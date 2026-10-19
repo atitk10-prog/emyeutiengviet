@@ -22,7 +22,7 @@ import {
   FileAudio
 } from 'lucide-react';
 import { AudioMetadata, Grade } from '@emytv/shared';
-import { httpsCallable } from 'firebase/functions';
+import { httpsCallable } from '../services/apiClient';
 import { functions } from '../firebase';
 
 export function computePassageHash(text: string): string {

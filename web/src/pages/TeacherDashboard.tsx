@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { httpsCallable } from 'firebase/functions';
 import {
   collection,
   query,
@@ -10,7 +9,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { functions, db } from '../firebase';
-import { createCallable } from '../services/apiClient';
+import { httpsCallable, createCallable } from '../services/apiClient';
 import { useAuth } from '../context/AuthContext';
 import {
   Classroom,

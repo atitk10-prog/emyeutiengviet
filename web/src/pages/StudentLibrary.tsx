@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { httpsCallable } from 'firebase/functions';
+import { httpsCallable } from '../services/apiClient';
 import { functions } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { MascotBird } from '../components/MascotBird';

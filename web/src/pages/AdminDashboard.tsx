@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { httpsCallable } from 'firebase/functions';
 import { functions } from '../firebase';
-import { createCallable } from '../services/apiClient';
+import { httpsCallable, createCallable } from '../services/apiClient';
 import { useAuth } from '../context/AuthContext';
 import {
   AdminOverviewSummary,

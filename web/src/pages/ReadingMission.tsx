@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { httpsCallable } from 'firebase/functions';
+import { httpsCallable } from '../services/apiClient';
 import { functions } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { AudioReader } from '../components/AudioReader';

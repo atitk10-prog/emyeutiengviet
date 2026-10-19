@@ -4,10 +4,10 @@
  * Provides 100% backward compatibility for all existing UI components
  */
 
-import { httpsCallable } from 'firebase/functions';
+import { httpsCallable as firebaseHttpsCallable } from 'firebase/functions';
 import { auth, functions } from '../firebase';
 
-// Migrated actions in Phase 2B.1 (/api/auth)
+// Migrated actions in /api/auth
 export const MIGRATED_AUTH_ACTIONS = new Set<string>([
   'accountLogin',
   'registerTeacherAccount',
@@ -21,7 +21,7 @@ export const MIGRATED_AUTH_ACTIONS = new Set<string>([
   'bootstrapAdminAccount'
 ]);
 
-// Migrated actions in Phase 2B.2 (/api/classrooms)
+// Migrated actions in /api/classrooms
 export const MIGRATED_CLASSROOM_ACTIONS = new Set<string>([
   'createClassroom',
   'updateClassroom',
@@ -30,7 +30,7 @@ export const MIGRATED_CLASSROOM_ACTIONS = new Set<string>([
   'checkClassCode'
 ]);
 
-// Migrated actions in Phase 2B.2 (/api/students)
+// Migrated actions in /api/students
 export const MIGRATED_STUDENT_ACTIONS = new Set<string>([
   'createStudentAccess',
   'rotateStudentAccess',
@@ -40,6 +40,51 @@ export const MIGRATED_STUDENT_ACTIONS = new Set<string>([
   'batchUpdateStudents',
   'transferStudentClass',
   'batchCreateStudents'
+]);
+
+// Migrated actions in /api/lessons
+export const MIGRATED_LESSON_ACTIONS = new Set<string>([
+  'getTeacherLessons',
+  'getLessonDetail',
+  'saveLessonDraft',
+  'publishLesson',
+  'archiveLesson',
+  'deleteDraftLesson',
+  'updateLessonScope',
+  'assignLesson',
+  'getAIStatus',
+  'testAIConnection'
+]);
+
+// Migrated actions in /api/attempts
+export const MIGRATED_ATTEMPT_ACTIONS = new Set<string>([
+  'getStudentLibrary',
+  'startAttempt',
+  'submitAnswer',
+  'finishAttempt',
+  'getAttemptReview'
+]);
+
+// Migrated actions in /api/analytics
+export const MIGRATED_ANALYTICS_ACTIONS = new Set<string>([
+  'getTeacherAnalytics',
+  'exportTeacherData',
+  'suggestRemediation',
+  'listRemediationActivities',
+  'saveRemediationActivity',
+  'approveRemediationActivity',
+  'deleteRemediationActivity'
+]);
+
+// Migrated actions in /api/admin
+export const MIGRATED_ADMIN_ACTIONS = new Set<string>([
+  'getAdminOverview',
+  'listTeachers',
+  'listAllClassesAdmin',
+  'getCurriculumFramework',
+  'listAcademicYears',
+  'approveTeacherAccount',
+  'toggleTeacherStatus'
 ]);
 
 export interface ApiCallableResponse<T = any> {
@@ -95,15 +140,26 @@ export async function callApi<TRes = any, TReq = any>(
     if (MIGRATED_STUDENT_ACTIONS.has(action)) {
       return invokeVercelEndpoint<TRes, TReq>('/api/students', action, payload);
     }
+    if (MIGRATED_LESSON_ACTIONS.has(action)) {
+      return invokeVercelEndpoint<TRes, TReq>('/api/lessons', action, payload);
+    }
+    if (MIGRATED_ATTEMPT_ACTIONS.has(action)) {
+      return invokeVercelEndpoint<TRes, TReq>('/api/attempts', action, payload);
+    }
+    if (MIGRATED_ANALYTICS_ACTIONS.has(action)) {
+      return invokeVercelEndpoint<TRes, TReq>('/api/analytics', action, payload);
+    }
+    if (MIGRATED_ADMIN_ACTIONS.has(action)) {
+      return invokeVercelEndpoint<TRes, TReq>('/api/admin', action, payload);
+    }
   }
 
   // Otherwise delegate directly to Firebase callable (Emulator or Cloud Functions)
   try {
-    const callable = httpsCallable<TReq, TRes>(functions, action);
+    const callable = firebaseHttpsCallable<TReq, TRes>(functions, action);
     const res = await callable(payload);
     return res.data;
   } catch (err: any) {
-    // Standardize Firebase Functions error into AppApiError
     const code = err?.code || 'internal';
     const message = err?.message || 'Đã có lỗi xảy ra khi xử lý yêu cầu.';
     throw new AppApiError(code, message, err?.details);
@@ -124,6 +180,17 @@ export function createCallable<TReq = any, TRes = any>(
 }
 
 /**
+ * Drop-in replacement for Firebase `httpsCallable(functions, action)`
+ * Enables components to switch from Firebase Cloud Functions to Vercel APIs transparently.
+ */
+export function httpsCallable<TReq = any, TRes = any>(
+  _functions: any,
+  action: string
+): (payload?: TReq) => Promise<ApiCallableResponse<TRes>> {
+  return createCallable<TReq, TRes>(action);
+}
+
+/**
  * Internal handler for Vercel Serverless Function endpoints (/api/*)
  */
 async function invokeVercelEndpoint<TRes = any, TReq = any>(
@@ -131,75 +198,45 @@ async function invokeVercelEndpoint<TRes = any, TReq = any>(
   action: string,
   payload?: TReq
 ): Promise<TRes> {
-  // Check online status
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    throw new AppApiError(
-      'unavailable',
-      'Mất kết nối mạng. Vui lòng kiểm tra lại đường truyền internet.'
-    );
-  }
-
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
   };
 
-  // Attach Firebase ID Token if logged in
-  if (auth.currentUser) {
-    try {
-      const idToken = await auth.currentUser.getIdToken();
+  // Inject current Firebase user ID token if available
+  try {
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      const idToken = await currentUser.getIdToken();
       if (idToken) {
         headers['Authorization'] = `Bearer ${idToken}`;
       }
-    } catch (e) {
-      console.warn('[ApiClient]: Could not retrieve auth token', e);
     }
+  } catch (tokenErr) {
+    console.warn('[ApiClient] Failed to acquire current user ID token:', tokenErr);
   }
 
-  let response: Response;
-  try {
-    response = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        action,
-        data: payload || {}
-      })
-    });
-  } catch (netErr: any) {
-    throw new AppApiError(
-      'unavailable',
-      'Không thể kết nối đến máy chủ. Vui lòng kiểm tra lại mạng hoặc thử lại sau ít phút.'
-    );
-  }
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action, data: payload })
+  });
 
-  let body: any;
+  let responseBody: any;
   try {
-    body = await response.json();
-  } catch {
+    responseBody = await response.json();
+  } catch (jsonErr) {
     throw new AppApiError(
       'internal',
-      `Máy chủ phản hồi không đúng định dạng (${response.status} ${response.statusText}).`
+      `Máy chủ phản hồi định dạng không hợp lệ (${response.status}).`
     );
   }
 
-  if (!response.ok || !body.success) {
-    const errObj = body?.error;
-    const code = errObj?.code || `http-${response.status}`;
-    const message =
-      errObj?.message || 'Yêu cầu không thể thực hiện được. Vui lòng thử lại.';
-
-    if (response.status === 401) {
-      throw new AppApiError('unauthenticated', message, errObj?.details);
-    }
-    if (response.status === 403) {
-      throw new AppApiError('permission-denied', message, errObj?.details);
-    }
-    if (response.status === 429) {
-      throw new AppApiError('resource-exhausted', message, errObj?.details);
-    }
-
-    throw new AppApiError(code, message, errObj?.details);
+  if (!response.ok || !responseBody.success) {
+    const errorData = responseBody.error || {};
+    const code = errorData.code || 'unknown';
+    const message = errorData.message || `Lỗi máy chủ (${response.status})`;
+    throw new AppApiError(code, message, errorData.details);
   }
 
-  return body.data as TRes;
+  return responseBody.data as TRes;
 }
