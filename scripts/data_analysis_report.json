@@ -1,0 +1,519 @@
+{
+  "summary": {
+    "totalUsers": 198,
+    "demoUsersCount": 1,
+    "testUsersCount": 137,
+    "unidentifiedUsersCount": 60,
+    "totalClasses": 65,
+    "demoClassesCount": 11,
+    "testClassesCount": 31,
+    "unidentifiedClassesCount": 23,
+    "totalStudents": 106,
+    "totalAuthAccounts": 269
+  },
+  "demoUsers": [
+    "B5H9PeMrZowS3ewPm4BQ8aM4fkU1"
+  ],
+  "unidentifiedUsers": [
+    {
+      "id": "2VZAYtmNmGgS2vVA5Y7YtzogGZdB",
+      "email": "admin.manager.1792274746141.vjdo8p@tieuhoc.edu.vn",
+      "displayName": "Quản trị viên cấp trường",
+      "role": "admin"
+    },
+    {
+      "id": "3YsJhnaBe8LKQGyEyS42VGVY6M52",
+      "email": "admin.manager.1792280705187.qr4s8o@tieuhoc.edu.vn",
+      "displayName": "Quản trị viên cấp trường",
+      "role": "admin"
+    },
+    {
+      "id": "5SbDIWHVn9F5Klu6IhLaiPyjwvdi",
+      "email": "teacher.export.1792249769236.2ki93g@tieuhoc.edu.vn",
+      "displayName": "teacher.export.1792249769236.2ki93g",
+      "role": "teacher"
+    },
+    {
+      "id": "6W5K1mmriaeQGAIGxhKwMwmt9ayv",
+      "email": "teacher_1792257449805@emytv.edu.vn",
+      "displayName": "teacher_1792257449805",
+      "role": "teacher"
+    },
+    {
+      "id": "6cs3FF6VkOpBrfoAqwzfVJsGJAu9",
+      "email": "admin.manager.1792277093177.jjkq6a@tieuhoc.edu.vn",
+      "displayName": "Quản trị viên cấp trường",
+      "role": "admin"
+    },
+    {
+      "id": "71dtOsz9SDUSv60vfQnQAPcUSU3A",
+      "email": "teacher_1792257385035@emytv.edu.vn",
+      "displayName": "teacher_1792257385035",
+      "role": "teacher"
+    },
+    {
+      "id": "7R7s3vV9lsWlECG8umMb2f4S1Hj3",
+      "email": "admin.manager.1792279488069.e0pyeb@tieuhoc.edu.vn",
+      "displayName": "Quản trị viên cấp trường",
+      "role": "admin"
+    },
+    {
+      "id": "82hDpXcPTiZR9v1n4gEpi0VBVhpt",
+      "email": "teacher.reader.1792259327583.lpioj@tieuhoc.edu.vn",
+      "displayName": "teacher.reader.1792259327583.lpioj",
+      "role": "teacher"
+    },
+    {
+      "id": "9PiNSRzVKn6w5DoIdoJ5GyK9lP0v",
+      "email": "teacher.export.1792279525384.kbpqq@tieuhoc.edu.vn",
+      "displayName": "teacher.export.1792279525384.kbpqq",
+      "role": "teacher"
+    },
+    {
+      "id": "A1BuQAWfVPjRcUH4pWunlvwWxvsA",
+      "email": "teacher.export.1792249827975.xn52@tieuhoc.edu.vn",
+      "displayName": "teacher.export.1792249827975.xn52",
+      "role": "teacher"
+    },
+    {
+      "id": "Byj2ktSLrz0hLoQoHeNFDhvU4M09",
+      "email": "teacher.export.1792277103012.uzswm@tieuhoc.edu.vn",
+      "displayName": "teacher.export.1792277103012.uzswm",
+      "role": "teacher"
+    },
+    {
+      "id": "DZTl2fDG1os9K04Xo7AS0qmYaBoh",
+      "email": "teacher.export.1792257390883.1zubp9@tieuhoc.edu.vn",
+      "displayName": "teacher.export.1792257390883.1zubp9",
+      "role": "teacher"
+    },
+    {
+      "id": "Dy7b6TaGBvPCbLFVlYLnUkMGw48O",
+      "email": "admin.manager.1792247161015.zb03sn@tieuhoc.edu.vn",
+      "displayName": "Quản trị viên cấp trường",
+      "role": "admin"
+    },
+    {
+      "id": "FsBjRpjjGNPck9g7p5Dy5O4FSUy2",
+      "email": "cophuong@emyeutiengviet.edu.vn",
+      "displayName": "cophuong",
+      "role": "teacher"
+    },
+    {
+      "id": "G6OupjhktDoasSomTgTJtAtkFNyY",
+      "email": "teacher.reader.1792247251123.7szib8@tieuhoc.edu.vn",
+      "displayName": "teacher.reader.1792247251123.7szib8",
+      "role": "teacher"
+    },
+    {
+      "id": "GZw42noGJwphjQs8jrifPZMph2u0",
+      "email": "teacher.reader.1792280705408.tyo68b@tieuhoc.edu.vn",
+      "displayName": "teacher.reader.1792280705408.tyo68b",
+      "role": "teacher"
+    },
+    {
+      "id": "HRsOKbA0IuEQatjXKJiLn2zEyxGS",
+      "email": "teacher_1792274746535@emytv.edu.vn",
+      "displayName": "teacher_1792274746535",
+      "role": "teacher"
+    },
+    {
+      "id": "HbKIIcGgY4JsQ4Ct2rkrTPD1jM4H",
+      "email": "admin.manager.1792259324178.9f28ef@tieuhoc.edu.vn",
+      "displayName": "Quản trị viên cấp trường",
+      "role": "admin"
+    },
+    {
+      "id": "IgsdHYGsU0ghr4MxmiilSV0sMyrZ",
+      "email": "admin.manager.1792274587870.rkyhek@tieuhoc.edu.vn",
+      "displayName": "Quản trị viên cấp trường",
+      "role": "admin"
+    },
+    {
+      "id": "Ji4YbkSudkXHCTJiTvTzoUD9baSx",
+      "email": "teacher_ai_1792259336473@emytv.edu.vn",
+      "displayName": "teacher_ai_1792259336473",
+      "role": "teacher"
+    },
+    {
+      "id": "KzIFYzuMioqzwQyUnRLoMTJVylXL",
+      "email": "teacher_ai_1792280708504@emytv.edu.vn",
+      "displayName": "teacher_ai_1792280708504",
+      "role": "teacher"
+    },
+    {
+      "id": "LPOggYcje1Sx2bbBRFA4jjwC3M0n",
+      "email": "teacher_1792259329308@emytv.edu.vn",
+      "displayName": "teacher_1792259329308",
+      "role": "teacher"
+    },
+    {
+      "id": "LcsEqix7E5ef6oXACG4DXjA0zPzN",
+      "email": "teacher_ai_1792257452438@emytv.edu.vn",
+      "displayName": "teacher_ai_1792257452438",
+      "role": "teacher"
+    },
+    {
+      "id": "LrJhR5BhK8MuvjJLAOQ6n9C2SNjO",
+      "email": "admin.manager.1792257449363.2d5b9m@tieuhoc.edu.vn",
+      "displayName": "Quản trị viên cấp trường",
+      "role": "admin"
+    },
+    {
+      "id": "MdFVF8v3Ccw98AsgKeDIiT3iHaah",
+      "email": "teacher_ai_1792274591231@emytv.edu.vn",
+      "displayName": "teacher_ai_1792274591231",
+      "role": "teacher"
+    },
+    {
+      "id": "MlsBQ7mpTadIEDvCJdNFH8LXu1UX",
+      "email": "teacher.reader.1792257449551.p09if@tieuhoc.edu.vn",
+      "displayName": "teacher.reader.1792257449551.p09if",
+      "role": "teacher"
+    },
+    {
+      "id": "Pqm6E71bRqfb4rV7ZKk75NzHDfvY",
+      "email": "teacher.reader.1792247164542.zf3jsp@tieuhoc.edu.vn",
+      "displayName": "teacher.reader.1792247164542.zf3jsp",
+      "role": "teacher"
+    },
+    {
+      "id": "QqqRW31i0mog7QPv9hIWiqmA7piw",
+      "email": "teacher_ai_1792247257583@emytv.edu.vn",
+      "displayName": "teacher_ai_1792247257583",
+      "role": "teacher"
+    },
+    {
+      "id": "SqogVPQUQrVVEdzswyU1CMGXw92D",
+      "email": "teacher_1792274588331@emytv.edu.vn",
+      "displayName": "teacher_1792274588331",
+      "role": "teacher"
+    },
+    {
+      "id": "UxmSx91xax8b7asZ0ZGJmJ5AeNqz",
+      "email": "teacher.export.1792279487386.bdlm5f@tieuhoc.edu.vn",
+      "displayName": "teacher.export.1792279487386.bdlm5f",
+      "role": "teacher"
+    },
+    {
+      "id": "We7uVWjVhchXwZGL8QRBJLVOlCqj",
+      "email": "teacher.reader.1792249847067.t74h2a@tieuhoc.edu.vn",
+      "displayName": "teacher.reader.1792249847067.t74h2a",
+      "role": "teacher"
+    },
+    {
+      "id": "XPkbMcWuDHoVY0vFq1IYnr4PfRuh",
+      "email": "teacher.reader.1792257397729.p43a1h@tieuhoc.edu.vn",
+      "displayName": "teacher.reader.1792257397729.p43a1h",
+      "role": "teacher"
+    },
+    {
+      "id": "XUGX0JbC74Xit8IfwM8y07m4Q6hh",
+      "email": "teacher_ai_1792274749565@emytv.edu.vn",
+      "displayName": "teacher_ai_1792274749565",
+      "role": "teacher"
+    },
+    {
+      "id": "Y3haIDQ82TdiMDDyMIssbz4h85qB",
+      "email": "teacher.reader.1792274746341.fqdu8g@tieuhoc.edu.vn",
+      "displayName": "teacher.reader.1792274746341.fqdu8g",
+      "role": "teacher"
+    },
+    {
+      "id": "ZBXSo3HfKIVF9Nt7zjfTcxS4RjSI",
+      "email": "teacher_ai_1792279488626@emytv.edu.vn",
+      "displayName": "teacher_ai_1792279488626",
+      "role": "teacher"
+    },
+    {
+      "id": "ZmvUlQHKnpsBLNp3hCzk3eYLi3Cn",
+      "email": "teacher_1792280705587@emytv.edu.vn",
+      "displayName": "teacher_1792280705587",
+      "role": "teacher"
+    },
+    {
+      "id": "cPojIzyZBbMZoNJCIYFqKrJAz6Id",
+      "email": "teacher.export.1792249844122.2f9ytp@tieuhoc.edu.vn",
+      "displayName": "teacher.export.1792249844122.2f9ytp",
+      "role": "teacher"
+    },
+    {
+      "id": "d4AB67f8vxXCRdW02hQlVzS0bjXk",
+      "email": "teacher.reader.1792274588095.3fkbk@tieuhoc.edu.vn",
+      "displayName": "teacher.reader.1792274588095.3fkbk",
+      "role": "teacher"
+    },
+    {
+      "id": "dYrhhqbjwLD8CnkFP2mhEg0CpyvF",
+      "email": "teacher.reader.1792279488465.ls3n5@tieuhoc.edu.vn",
+      "displayName": "teacher.reader.1792279488465.ls3n5",
+      "role": "teacher"
+    },
+    {
+      "id": "dZPo41k7tks0wtFSMg2JVFm2x2y8",
+      "email": "teacher_ai_1792249845622@emytv.edu.vn",
+      "displayName": "teacher_ai_1792249845622",
+      "role": "teacher"
+    },
+    {
+      "id": "dcfXwPGBwAhaP5Z1fG78QHQB3aoo",
+      "email": "admin.manager.1792247250864.09l7fh@tieuhoc.edu.vn",
+      "displayName": "Quản trị viên cấp trường",
+      "role": "admin"
+    },
+    {
+      "id": "e0nygUOtgEiN6BbbQiz2M5brfpKw",
+      "email": "admin.manager.1792279524719.0ivum@tieuhoc.edu.vn",
+      "displayName": "Quản trị viên cấp trường",
+      "role": "admin"
+    },
+    {
+      "id": "i8b9gsfZbDmWN6DRBqqp9jRifwgr",
+      "email": "admin@emyeutiengviet.edu.vn",
+      "displayName": "Quản trị viên Hệ thống",
+      "role": "admin"
+    },
+    {
+      "id": "j5979qW3zqj4Ni1yPlY0r0OFcIm2",
+      "email": "teacher.export.1792274747656.wia5h@tieuhoc.edu.vn",
+      "displayName": "teacher.export.1792274747656.wia5h",
+      "role": "teacher"
+    },
+    {
+      "id": "lOamOKduOYwqs3NGiIvIT6AknwTU",
+      "email": "teacher_1792277098528@emytv.edu.vn",
+      "displayName": "teacher_1792277098528",
+      "role": "teacher"
+    },
+    {
+      "id": "ly66WNTzyvSI1esiDGWYToJnURIX",
+      "email": "teacher.export.1792257450743.sypyo6@tieuhoc.edu.vn",
+      "displayName": "teacher.export.1792257450743.sypyo6",
+      "role": "teacher"
+    },
+    {
+      "id": "m9qjBZLujOd7qiaUKegUze21Hivb",
+      "email": "teacher.reader.1792277096692.an64fp@tieuhoc.edu.vn",
+      "displayName": "teacher.reader.1792277096692.an64fp",
+      "role": "teacher"
+    },
+    {
+      "id": "nqzOKb7qDvjKVVt3RVXLACZ1jY5h",
+      "email": "teacher_1792279484296@emytv.edu.vn",
+      "displayName": "teacher_1792279484296",
+      "role": "teacher"
+    },
+    {
+      "id": "onFWP2EVuS2QSItYcwCWfuoG9egs",
+      "email": "teacher_1792247250621@emytv.edu.vn",
+      "displayName": "teacher_1792247250621",
+      "role": "teacher"
+    },
+    {
+      "id": "rddJ00Uaz4qlN7hSbzAI13dTWzPA",
+      "email": "teacher_1792249843808@emytv.edu.vn",
+      "displayName": "teacher_1792249843808",
+      "role": "teacher"
+    },
+    {
+      "id": "sOVGm8ZAqV8XyjdhNNXYxNS9j78n",
+      "email": "teacher_ai_1792257396306@emytv.edu.vn",
+      "displayName": "teacher_ai_1792257396306",
+      "role": "teacher"
+    },
+    {
+      "id": "sYr6z3sL1LLUOzN9rzlZtOuSnPGw",
+      "email": "teacher_ai_1792277106056@emytv.edu.vn",
+      "displayName": "teacher_ai_1792277106056",
+      "role": "teacher"
+    },
+    {
+      "id": "tnBKuuB8BeUm24gImNMLT3B1ly8b",
+      "email": "teacher_1792279523843@emytv.edu.vn",
+      "displayName": "teacher_1792279523843",
+      "role": "teacher"
+    },
+    {
+      "id": "u4K2B0Kk4I9lVVCI2tdJaMnZPD25",
+      "email": "teacher_ai_1792279518061@emytv.edu.vn",
+      "displayName": "teacher_ai_1792279518061",
+      "role": "teacher"
+    },
+    {
+      "id": "uMyVecoJbYtsMT4peiiQnoMFPXA2",
+      "email": "teacher.export.1792259333464.pztlo9@tieuhoc.edu.vn",
+      "displayName": "teacher.export.1792259333464.pztlo9",
+      "role": "teacher"
+    },
+    {
+      "id": "uVyuBAvFTDdY0If9iUg27QaBnaSB",
+      "email": "admin.manager.1792249846841.yz5za@tieuhoc.edu.vn",
+      "displayName": "Quản trị viên cấp trường",
+      "role": "admin"
+    },
+    {
+      "id": "v2UPSdJsclAPbHBp0Fqu38kNQHYD",
+      "email": "teacher.export.1792280706663.1d4zuk@tieuhoc.edu.vn",
+      "displayName": "teacher.export.1792280706663.1d4zuk",
+      "role": "teacher"
+    },
+    {
+      "id": "vSCWRj5mXCucyBf22LolxI2Baza4",
+      "email": "admin.manager.1792257395373.7mwak@tieuhoc.edu.vn",
+      "displayName": "Quản trị viên cấp trường",
+      "role": "admin"
+    },
+    {
+      "id": "vvd9FRA0vwmlDES30Cdpeg3vWjxk",
+      "email": "teacher.reader.1792279524979.vdb1n@tieuhoc.edu.vn",
+      "displayName": "teacher.reader.1792279524979.vdb1n",
+      "role": "teacher"
+    },
+    {
+      "id": "wwMQbj3rP7I50Joc488aNrDqOnkQ",
+      "email": "teacher.export.1792249813184.g62icp@tieuhoc.edu.vn",
+      "displayName": "teacher.export.1792249813184.g62icp",
+      "role": "teacher"
+    }
+  ],
+  "unidentifiedClasses": [
+    {
+      "id": "0KudFVBeFDKYzytDGxWJ",
+      "name": "Lớp 2A - Thực Nghiệm",
+      "code": "6P6GQB",
+      "teacherUid": "rddJ00Uaz4qlN7hSbzAI13dTWzPA"
+    },
+    {
+      "id": "3FE1SqxsmfnD0bvrCapm",
+      "name": "Lớp 3A - Bảo Mật",
+      "code": "C4Z8EW",
+      "teacherUid": "cpYv1X0WaoDpSWgFBofCFfeVvhSD"
+    },
+    {
+      "id": "4TTAANkdKb94mFYw5L6Q",
+      "name": "Lớp 3A - Bảo Mật",
+      "code": "E2GVXH",
+      "teacherUid": "A3Myg5UknMyDAYMSZWkYjrejeHpK"
+    },
+    {
+      "id": "4pZDZ5LRjs7pVZf9eITu",
+      "name": "Lớp 3A - Bảo Mật",
+      "code": "NS55YU",
+      "teacherUid": "1L8VRTCeJnarImPjpYVIeec1bdY7"
+    },
+    {
+      "id": "683vUNWZWMPbbpcI9iZ6",
+      "name": "Lớp 2A - Thực Nghiệm",
+      "code": "MN94BY",
+      "teacherUid": "lOamOKduOYwqs3NGiIvIT6AknwTU"
+    },
+    {
+      "id": "92YwdQVUOyOD8piJHnHE",
+      "name": "Lớp 3A - Bảo Mật",
+      "code": "562M2Y",
+      "teacherUid": "X9lr8MVuRMNhSIWK0DkyfT8kIn9N"
+    },
+    {
+      "id": "Ac2ePz9idMG4plaCDEVm",
+      "name": "Lớp 2A - Thực Nghiệm",
+      "code": "H6PZBS",
+      "teacherUid": "71dtOsz9SDUSv60vfQnQAPcUSU3A"
+    },
+    {
+      "id": "FBoIxLE1HRTkPiuHhKMy",
+      "name": "Lớp 3A - Bảo Mật",
+      "code": "7ERA6Q",
+      "teacherUid": "iQn5hJvVUyRTLFD6SB9PD0w5u2nZ"
+    },
+    {
+      "id": "LNk9MwiE3ixUVSbk9egX",
+      "name": "Lớp 2A - Thực Nghiệm",
+      "code": "7WAL4M",
+      "teacherUid": "LPOggYcje1Sx2bbBRFA4jjwC3M0n"
+    },
+    {
+      "id": "OyPBDGrMxg86YotegnQB",
+      "name": "Lớp 2A - Thực Nghiệm",
+      "code": "GNBR85",
+      "teacherUid": "6W5K1mmriaeQGAIGxhKwMwmt9ayv"
+    },
+    {
+      "id": "PMijl4JWiacHMnGAFceT",
+      "name": "Lớp 3A - Bảo Mật",
+      "code": "WZ79GP",
+      "teacherUid": "n5AyclgAH1oGKBDUnlk8R40o1WCn"
+    },
+    {
+      "id": "TAR0nyT6SJRocY6uSrVK",
+      "name": "Lớp 2A - Thực Nghiệm",
+      "code": "KVTK7W",
+      "teacherUid": "onFWP2EVuS2QSItYcwCWfuoG9egs"
+    },
+    {
+      "id": "Whd45iQdcEbjcehnbrzS",
+      "name": "Lớp 3A - Bảo Mật",
+      "code": "X9H5DT",
+      "teacherUid": "l072N42d3aUGkA5cwc08UkRDkhGh"
+    },
+    {
+      "id": "XYezP3LN9nvPo5ZtuAh5",
+      "name": "Lớp 3A - Bảo Mật",
+      "code": "6MPAER",
+      "teacherUid": "DJFEnPggvMJ5j7ejpJa9ugYRVi2Y"
+    },
+    {
+      "id": "fzOiySMqQdihqcaJSEEy",
+      "name": "Lớp 2A - Thực Nghiệm",
+      "code": "28UA49",
+      "teacherUid": "nqzOKb7qDvjKVVt3RVXLACZ1jY5h"
+    },
+    {
+      "id": "hd8SfCxk1ZLTrMjPW3j7",
+      "name": "Lớp 2A - Thực Nghiệm",
+      "code": "5F9PJV",
+      "teacherUid": "ZmvUlQHKnpsBLNp3hCzk3eYLi3Cn"
+    },
+    {
+      "id": "hh1QS9SGz98HgyXSLruU",
+      "name": "Lớp 3A - Bảo Mật",
+      "code": "RM48U2",
+      "teacherUid": "HXI9HOlIUFr4VSQKbZvC2XY6gCsG"
+    },
+    {
+      "id": "pBQlLwUTgxlTP3ceg6mV",
+      "name": "Lớp 2A - Ban Mai",
+      "code": "9JZVTW",
+      "teacherUid": "FsBjRpjjGNPck9g7p5Dy5O4FSUy2"
+    },
+    {
+      "id": "qjYFE89GE66tfXCVG2w0",
+      "name": "Lớp 2A - Thực Nghiệm",
+      "code": "28L9NR",
+      "teacherUid": "SqogVPQUQrVVEdzswyU1CMGXw92D"
+    },
+    {
+      "id": "sdTiEWmUsryoyIpvIX8P",
+      "name": "Lớp 3A - Bảo Mật",
+      "code": "9XKEJN",
+      "teacherUid": "ygcIehfRVBHB465xireYcwjiX4EO"
+    },
+    {
+      "id": "vYlsBCHXSmSOhbEsTRnJ",
+      "name": "Lớp 2A - Thực Nghiệm",
+      "code": "WC2EJJ",
+      "teacherUid": "HRsOKbA0IuEQatjXKJiLn2zEyxGS"
+    },
+    {
+      "id": "wT9DAcQjEKpk3HaT8Hb6",
+      "name": "Lớp 2A - Thực Nghiệm",
+      "code": "2VK48A",
+      "teacherUid": "tnBKuuB8BeUm24gImNMLT3B1ly8b"
+    },
+    {
+      "id": "xS9d2j9QBuncSc826r5I",
+      "name": "Lớp 3A - Bảo Mật",
+      "code": "LR2GGR",
+      "teacherUid": "Bk5hL1MDm2XsCAfdYzkNlZoRga72"
+    }
+  ]
+}

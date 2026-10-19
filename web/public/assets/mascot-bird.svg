@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="100%" height="100%">
+  <defs>
+    <linearGradient id="skyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#0284C7" />
+    </linearGradient>
+    <linearGradient id="bellyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FEF9C3" />
+      <stop offset="100%" stop-color="#FEF08A" />
+    </linearGradient>
+    <linearGradient id="bookCoverGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0F172A" flood-opacity="0.12" />
+    </filter>
+  </defs>
+
+  <g filter="url(#softShadow)">
+    <!-- Tail Feathers -->
+    <path d="M40 120 C20 115 15 135 22 145 C30 155 52 140 50 130 Z" fill="#0284C7" />
+    <path d="M30 130 C15 130 12 148 20 156 C28 162 45 150 42 140 Z" fill="#0369A1" />
+
+    <!-- Main Bird Body -->
+    <circle cx="105" cy="105" r="58" fill="url(#skyGrad)" />
+
+    <!-- Soft Cream Belly -->
+    <ellipse cx="118" cy="118" rx="36" ry="38" fill="url(#bellyGrad)" />
+
+    <!-- Left Wing (Holding Open Book) -->
+    <path d="M62 108 C50 92 68 76 82 90 C90 98 84 122 72 120 Z" fill="#0EA5E9" />
+
+    <!-- Right Wing -->
+    <path d="M148 108 C160 92 142 76 128 90 C120 98 126 122 138 120 Z" fill="#0EA5E9" />
+
+    <!-- Leaf Crest on Head (Curriculum Growth Symbol) -->
+    <path d="M98 48 C92 32 106 24 114 32 C120 38 112 48 105 48 Z" fill="#22C55E" />
+    <path d="M106 45 C112 30 126 26 128 36 C128 42 118 46 112 46 Z" fill="#16A34A" />
+
+    <!-- Cheerful Big Eyes -->
+    <ellipse cx="118" cy="85" rx="10" ry="12" fill="#FFFFFF" />
+    <ellipse cx="146" cy="85" rx="10" ry="12" fill="#FFFFFF" />
+    <!-- Pupils with shiny catchlights -->
+    <circle cx="121" cy="85" r="5.5" fill="#0F172A" />
+    <circle cx="149" cy="85" r="5.5" fill="#0F172A" />
+    <circle cx="123" cy="83" r="2" fill="#FFFFFF" />
+    <circle cx="151" cy="83" r="2" fill="#FFFFFF" />
+
+    <!-- Rosy Blushing Cheeks -->
+    <ellipse cx="108" cy="98" rx="6" ry="3.5" fill="#F43F5E" opacity="0.35" />
+    <ellipse cx="156" cy="98" rx="6" ry="3.5" fill="#F43F5E" opacity="0.35" />
+
+    <!-- Golden Orange Beak -->
+    <path d="M130 92 L146 100 L130 108 Z" fill="#F59E0B" stroke="#D97706" stroke-width="2" stroke-linejoin="round" />
+
+    <!-- Open Book in Front -->
+    <g transform="translate(75, 125)">
+      <!-- Book spine & cover shadow -->
+      <path d="M5 22 Q30 26 55 22 Q55 32 30 36 Q5 32 5 22 Z" fill="#B45309" />
+      <!-- Left Page -->
+      <path d="M5 20 Q30 14 30 25 Q30 25 5 30 Z" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.5" />
+      <!-- Right Page -->
+      <path d="M55 20 Q30 14 30 25 Q30 25 55 30 Z" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5" />
+      <!-- Cover edges -->
+      <path d="M3 21 Q30 15 30 26 L29 28 Q30 17 3 23 Z" fill="url(#bookCoverGrad)" />
+      <path d="M57 21 Q30 15 30 26 L31 28 Q30 17 57 23 Z" fill="url(#bookCoverGrad)" />
+      <!-- Tiny page lines -->
+      <line x1="10" y1="23" x2="25" y2="21" stroke="#94A3B8" stroke-width="1" stroke-linecap="round" />
+      <line x1="10" y1="26" x2="23" y2="24" stroke="#94A3B8" stroke-width="1" stroke-linecap="round" />
+      <line x1="35" y1="21" x2="50" y2="23" stroke="#94A3B8" stroke-width="1" stroke-linecap="round" />
+      <line x1="37" y1="24" x2="50" y2="26" stroke="#94A3B8" stroke-width="1" stroke-linecap="round" />
+    </g>
+
+    <!-- Little Orange Feet -->
+    <path d="M92 162 L92 172 M88 172 L96 172" stroke="#F59E0B" stroke-width="3.5" stroke-linecap="round" />
+    <path d="M118 162 L118 172 M114 172 L122 172" stroke="#F59E0B" stroke-width="3.5" stroke-linecap="round" />
+  </g>
+</svg>

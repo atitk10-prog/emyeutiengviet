@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dist & Builds
+dist/
+**/dist/
+web/dist/
+functions/lib/
+shared/dist/
+
+# Firebase & Local Emulators Data
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+*.log
+emulator-data/
+emulator-data*/
+backups/
+
+# Storage & Audio Data (Local/Private uploads)
+persistent_storage/
+web/public/audio/uploads/
+
+# Environment, Secrets & Credentials
+.env
+.env.local
+.env.*.local
+*.env
+*.env.local
+**/.env
+**/.env.*
+!**/.env.example
+.secret.local
+*.secret.local
+serviceAccountKey*.json
+*serviceAccount*.json
+*credential*.json
+
+# Local Runtimes & Third-Party Evaluation Tools
+.jdk21/
+.tmp_chrome/
+scratch/
+artifacts/
+piper-master/
+VieNeu-TTS-main/
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

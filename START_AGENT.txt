@@ -1,0 +1,5 @@
+HÃY ĐỌC TOÀN BỘ `EMYTV_ONEPASS_AGENT.md`, `EMYTV_RELEASE_GATES.md` VÀ `EMYTV_SAMPLE_CASES.json` Ở THƯ MỤC GỐC WORKSPACE `EMYTV_AGENT_PACK`. ĐỒNG THỜI ĐỌC CÁC PROMPT VÀ BÁO CÁO DỰ ÁN HIỆN CÓ. KHÔNG TẠO REPO MỚI, KHÔNG DEPLOY, KHÔNG NÂNG BLAZE, KHÔNG THAY ĐỔI FIREBASE CLOUD.
+
+Hãy thực hiện một đợt hardening + acceptance P0–P4 theo tài liệu: sửa model Gemini lỗi thời, đảm bảo API key chỉ ở backend, bảo vệ dữ liệu học sinh, rà soát mã truy cập, kiểm thử bằng các bài mẫu và E2E, giữ nguyên các tính năng đang chạy. Nếu người dùng chưa nhập Gemini API key, làm xong toàn bộ phần khác và ghi G3 BLOCKED, hướng dẫn đặt key cục bộ, không hỏi hoặc in key ra chat.
+
+Trước khi sửa hãy lập checkpoint. Sau mỗi nhóm sửa, chạy kiểm thử thực sự và sửa lỗi. Cuối cùng cập nhật QA_REPORT, FINAL_RELEASE_AUDIT, README; tạo ONEPASS_CHANGELOG và CLOUD_STAGING_DEPLOY_PLAN. Báo rõ G1/G2/G3/G4 PASS/FAIL/BLOCKED kèm bằng chứng. Không tuyên bố hoàn thành Cloud khi vẫn chỉ chạy Emulator. BẮT ĐẦU ĐỌC TỆP VÀ TIẾN HÀNH SỬA MÃ NGUỒN TRỰC TIẾP.

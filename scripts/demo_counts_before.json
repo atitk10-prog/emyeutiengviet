@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-10-18T17:18:42.213Z",
+  "projectId": "em-yeu-tieng-viet-demo",
+  "firestoreCounts": {
+    "users": 2,
+    "classes": 10,
+    "students": 198,
+    "lessons": 20,
+    "assignments": 26,
+    "attempts": 403
+  },
+  "authAccountsCount": 279
+}

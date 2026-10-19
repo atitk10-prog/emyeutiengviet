@@ -1,0 +1,37 @@
+{
+  "name": "em-yeu-tieng-viet",
+  "version": "1.0.0",
+  "description": "EM YÊU TIẾNG VIỆT - Ứng dụng AI thiết kế học liệu tương tác nâng cao năng lực đọc hiểu cho học sinh lớp 2-3",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "functions",
+    "web"
+  ],
+  "scripts": {
+    "postinstall": "npm run build --workspace=shared",
+    "build:shared": "npm run build --workspace=shared",
+    "build:functions": "npm run build --workspace=functions",
+    "build:web": "npm run build --workspace=web",
+    "build": "npm run build --workspace=shared && npm run build --workspace=functions && npm run build --workspace=web",
+    "dev": "npm run dev --workspace=web",
+    "dev:web": "npm run dev --workspace=web",
+    "emulators": "npx firebase-tools emulators:start --import=./emulator-data --export-on-exit=./emulator-data",
+    "emulators:export": "npx firebase-tools emulators:export --force ./emulator-data",
+    "test:unit": "npm run test --workspace=functions",
+    "test:rules": "node --test tests/rules.test.mjs",
+    "test:security": "node --test tests/security_and_ai.test.mjs",
+    "test:pedagogical": "node --test tests/pedagogical_fixtures.test.mjs",
+    "test:e2e": "node --test tests/e2e.test.mjs",
+    "test:all": "node --test --test-concurrency=1 tests/rules.test.mjs tests/pedagogical_fixtures.test.mjs tests/security_and_ai.test.mjs tests/e2e.test.mjs tests/admin_and_curriculum.test.mjs tests/persistence_and_recovery.test.mjs tests/ux_audio_attempt_excel.test.mjs tests/v5_1_security_and_ux.test.mjs tests/v5_2_lesson_lifecycle.test.mjs",
+    "test:gemini:live": "node --test tests/live_gemini_verification.test.mjs",
+    "test": "npm run test:all"
+  },
+  "devDependencies": {
+    "firebase-tools": "^13.30.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  }
+}

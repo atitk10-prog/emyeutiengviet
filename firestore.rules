@@ -1,0 +1,163 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isUser(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    function isTeacher() {
+      // Must be authenticated and have teacher role in users doc or custom claims
+      return isAuthenticated() && (
+        request.auth.token.role == 'teacher' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher'
+      );
+    }
+
+    function isAdmin() {
+      // Must be authenticated and have admin role in users doc or custom claims
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Users collection: users can read their own profile, admin can read all users
+    match /users/{userId} {
+      allow read: if isUser(userId) || isAdmin();
+      allow create: if isUser(userId) 
+        && request.resource.data.role != 'teacher'
+        && request.resource.data.role != 'admin'; // Roles must be granted via backend bootstrap
+      allow update: if (isUser(userId) && request.resource.data.role == resource.data.role)
+        || isAdmin(); // Prevent role self-escalation
+      allow delete: if false;
+    }
+
+    // Classes: managed by teacher or viewed by school admin
+    match /classes/{classId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() ||
+        resource.data.get('teacherUid', '') == request.auth.uid ||
+        request.auth.token.get('classId', '') == classId
+      );
+      allow create: if isTeacher() && request.resource.data.get('teacherUid', '') == request.auth.uid;
+      allow update, delete: if (isTeacher() && resource.data.get('teacherUid', '') == request.auth.uid) || isAdmin();
+    }
+
+    // Curriculum Nodes: viewable by authenticated users, editable only by admin
+    match /curriculumNodes/{nodeId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Students: read/write by teacher of class
+    match /students/{studentId} {
+      allow read: if isTeacher() && (
+        get(/databases/$(database)/documents/classes/$(resource.data.get('classId', ''))).data.get('teacherUid', '') == request.auth.uid
+      );
+      allow write: if isTeacher() && (
+        get(/databases/$(database)/documents/classes/$(request.resource.data.get('classId', ''))).data.get('teacherUid', '') == request.auth.uid
+      );
+    }
+
+    // Student Secrets: DENY ALL CLIENTS - Functions Admin SDK only
+    match /studentSecrets/{studentId} {
+      allow read, write: if false;
+    }
+
+    // Student Sessions: DENY ALL CLIENTS - Functions Admin SDK only
+    match /studentSessions/{authUid} {
+      allow read, write: if false;
+    }
+
+    // Lessons: managed by teacher
+    match /lessons/{lessonId} {
+      allow read: if (isTeacher() && (
+        resource.data.get('teacherUid', '') in [request.auth.uid, 'seed_teacher_uid', 'system', 'uVyuBAvFTDdY0If9iUg27QaBnaSB'] ||
+        resource.data.get('status', '') == 'published'
+      )) || isAdmin();
+      allow create: if isTeacher() && request.resource.data.get('teacherUid', '') == request.auth.uid;
+      allow update, delete: if (isTeacher() && resource.data.get('teacherUid', '') == request.auth.uid) || isAdmin();
+
+      // Versions subcollection
+      match /versions/{versionId} {
+        allow read: if (isTeacher() && (
+          get(/databases/$(database)/documents/lessons/$(lessonId)).data.get('teacherUid', '') in [request.auth.uid, 'seed_teacher_uid', 'system', 'uVyuBAvFTDdY0If9iUg27QaBnaSB'] ||
+          resource.data.get('publishedAt', null) != null
+        ))
+          || isAdmin()
+          || (isAuthenticated() && resource.data.get('publishedAt', null) != null);
+        allow create, update: if isTeacher() && get(/databases/$(database)/documents/lessons/$(lessonId)).data.get('teacherUid', '') == request.auth.uid;
+        allow delete: if false; // Versions are immutable once created
+      }
+    }
+
+    // Private Answer Keys: DENY ALL CLIENTS - Functions Admin SDK only!
+    match /privateAnswerKeys/{versionId} {
+      allow read, write: if false;
+    }
+
+    // Assignments: read by teacher or students assigned
+    match /assignments/{assignmentId} {
+      allow read: if isAuthenticated() && (
+        resource.data.get('teacherUid', '') == request.auth.uid ||
+        resource.data.get('teacherUid', '') in ['seed_teacher_uid', 'system', 'uVyuBAvFTDdY0If9iUg27QaBnaSB'] ||
+        request.auth.token.get('classId', '') == resource.data.get('classId', '')
+      );
+      allow create: if isTeacher() && request.resource.data.get('teacherUid', '') == request.auth.uid;
+      allow update, delete: if isTeacher() && resource.data.get('teacherUid', '') == request.auth.uid;
+    }
+
+    // Attempts: Student can only view their own; Teacher can view attempts for their assignments.
+    // Client writes are blocked; creation & scoring must go through Cloud Functions!
+    match /attempts/{attemptId} {
+      allow read: if isAuthenticated() && (
+        resource.data.get('studentId', '') == request.auth.token.get('studentId', '') ||
+        resource.data.get('teacherUid', '') == request.auth.uid
+      );
+      allow write: if false; // Admin SDK handles attempts to ensure integrity
+    }
+
+    // Attempt Responses: Client writes blocked
+    match /attempts/{attemptId}/responses/{responseId} {
+      allow read: if isAuthenticated() && (
+        get(/databases/$(database)/documents/attempts/$(attemptId)).data.get('studentId', '') == request.auth.token.get('studentId', '') ||
+        get(/databases/$(database)/documents/attempts/$(attemptId)).data.get('teacherUid', '') == request.auth.uid
+      );
+      allow write: if false;
+    }
+
+    // Remediation Activities: Teacher manages their own remediation activities
+    match /remediationActivities/{activityId} {
+      allow read: if isTeacher() && (
+        resource.data.get('teacherId', '') == request.auth.uid ||
+        resource.data.get('teacherUid', '') == request.auth.uid
+      );
+      allow create: if isTeacher() && (
+        request.resource.data.get('teacherId', '') == request.auth.uid ||
+        request.resource.data.get('teacherUid', '') == request.auth.uid
+      );
+      allow update, delete: if isTeacher() && (
+        resource.data.get('teacherId', '') == request.auth.uid ||
+        resource.data.get('teacherUid', '') == request.auth.uid
+      );
+    }
+
+    // AI Jobs / Usage
+    match /aiJobs/{jobId} {
+      allow read: if isTeacher() && resource.data.get('teacherUid', '') == request.auth.uid;
+      allow write: if isTeacher() && request.resource.data.get('teacherUid', '') == request.auth.uid;
+    }
+  }
+}

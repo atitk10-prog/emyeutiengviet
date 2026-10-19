@@ -1,0 +1,37 @@
+[
+  {
+    "target": "Admin Dashboard Overview",
+    "functionName": "getAdminOverview",
+    "recordsCount": 317,
+    "avgLatencyMs": 56,
+    "dataSizeKB": 0.52
+  },
+  {
+    "target": "Danh sách giáo viên (Admin)",
+    "functionName": "listTeachers",
+    "recordsCount": 144,
+    "avgLatencyMs": 36,
+    "dataSizeKB": 27.49
+  },
+  {
+    "target": "Danh sách lớp học (Toàn trường)",
+    "functionName": "listAllClassesAdmin",
+    "recordsCount": 66,
+    "avgLatencyMs": 46,
+    "dataSizeKB": 16.45
+  },
+  {
+    "target": "Danh sách học sinh (Lớp demo)",
+    "functionName": "students.where(classId)",
+    "recordsCount": 5,
+    "avgLatencyMs": 7,
+    "dataSizeKB": 1.22
+  },
+  {
+    "target": "Hồ sơ cá nhân & Đổi mật khẩu",
+    "functionName": "users.doc(uid)",
+    "recordsCount": 1,
+    "avgLatencyMs": 15,
+    "dataSizeKB": 0.5
+  }
+]

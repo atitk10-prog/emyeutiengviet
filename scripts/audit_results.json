@@ -1,0 +1,142 @@
+{
+  "timestamp": "2026-10-18T03:55:34.002Z",
+  "totals": {
+    "users": 198,
+    "teachers": 140,
+    "activeTeachers": 140,
+    "suspendedTeachers": 0,
+    "admins": 58,
+    "classes": 65,
+    "students": 106,
+    "lessons": 38,
+    "assignments": 45,
+    "attempts": 44,
+    "studentSecrets": 106,
+    "studentSessions": 62,
+    "curriculumNodes": 11,
+    "authUsers": 269
+  },
+  "classes2C": [
+    {
+      "id": "3ZwKTgmADL8JaA7SCbbS",
+      "teacherUid": "gs2gawWTmAQmoFQoeBHnBTjn053K",
+      "name": "Lớp 2C Thử Nghiệm V5.1",
+      "grade": 2,
+      "classCode": "NFB2XZ",
+      "academicYear": "2025-2026",
+      "status": "active",
+      "createdAt": 1792280720803
+    },
+    {
+      "id": "AEkOXk5mDu1wN0KEvFR9",
+      "teacherUid": "FQkL5L0ZHgqbB4Ieo94E5j332riR",
+      "name": "Lớp 2C Thử Nghiệm V5.1",
+      "grade": 2,
+      "classCode": "EUW7GA",
+      "academicYear": "2025-2026",
+      "status": "active",
+      "createdAt": 1792277129581
+    },
+    {
+      "id": "LoUvrjXb6WBIDrJSg1QB",
+      "teacherUid": "R1BSQvEtzkXARqk2Pm7j4E2VwQ4q",
+      "name": "Lớp 2C Thử Nghiệm V5.1",
+      "grade": 2,
+      "classCode": "ZZLX78",
+      "academicYear": "2025-2026",
+      "status": "active",
+      "createdAt": 1792279484745
+    },
+    {
+      "id": "Nico0x63etMGUIAOGXgy",
+      "teacherUid": "ttQdJz9nlM83ZEHW7fTU79kzJ18y",
+      "name": "Lớp 2C Thử Nghiệm V5.1",
+      "grade": 2,
+      "classCode": "B74XLV",
+      "academicYear": "2025-2026",
+      "status": "active",
+      "createdAt": 1792257442982
+    },
+    {
+      "id": "OA3tsKnUG6FEaWSmWSE4",
+      "teacherUid": "B5H9PeMrZowS3ewPm4BQ8aM4fkU1",
+      "classCode": "MXK4FH",
+      "createdAt": 1792247550350,
+      "academicYear": "2025-2026",
+      "grade": 2,
+      "name": "Lop 2C",
+      "status": "active"
+    },
+    {
+      "id": "QqhcPkVrQihdHpOgxjzo",
+      "teacherUid": "k5VFlZZnt9Ou5zPzBL1wL7cyMeOj",
+      "name": "Lớp 2C Thử Nghiệm V5.1",
+      "grade": 2,
+      "classCode": "GDR3SV",
+      "academicYear": "2025-2026",
+      "status": "active",
+      "createdAt": 1792274603156
+    },
+    {
+      "id": "ZoSd4UZSP4b2EpUCx1Nd",
+      "teacherUid": "oCrFT6VEJmQwnqyUS1zGO9JGDOtD",
+      "name": "Lớp 2C Thử Nghiệm V5.1",
+      "grade": 2,
+      "classCode": "8AXZVL",
+      "academicYear": "2025-2026",
+      "status": "active",
+      "createdAt": 1792257464693
+    },
+    {
+      "id": "bKv8iiCedB2rUTwcX8zo",
+      "teacherUid": "wHZyQuu72oauf7DVJ1o8czKtgH6a",
+      "name": "Lớp 2C Thử Nghiệm V5.1",
+      "grade": 2,
+      "classCode": "4T2R66",
+      "academicYear": "2025-2026",
+      "status": "active",
+      "createdAt": 1792257390855
+    },
+    {
+      "id": "diIJizE9htbB9Rv1fXME",
+      "teacherUid": "BWb2YVMqB3RdMSpNyqt5junQAYsp",
+      "name": "Lớp 2C Thử Nghiệm V5.1",
+      "grade": 2,
+      "classCode": "SJD2Z9",
+      "academicYear": "2025-2026",
+      "status": "active",
+      "createdAt": 1792279532784
+    },
+    {
+      "id": "jmkxem9dm1MYeFp9DHLQ",
+      "teacherUid": "rSgxEiy6RfwftQog1T7J5nHPG42z",
+      "name": "Lớp 2C Thử Nghiệm V5.1",
+      "grade": 2,
+      "classCode": "7R85UC",
+      "academicYear": "2025-2026",
+      "status": "active",
+      "createdAt": 1792274761389
+    },
+    {
+      "id": "qm7kFK3BdGFTHlRRFSm3",
+      "teacherUid": "qLK9u7OwGa030uBchqFv90dHgXZd",
+      "name": "Lớp 2C Thử Nghiệm V5.1",
+      "grade": 2,
+      "classCode": "J68HHN",
+      "academicYear": "2025-2026",
+      "status": "active",
+      "createdAt": 1792259358432
+    }
+  ],
+  "mismatchedClassCountsCount": 59,
+  "classifiedTeachers": {
+    "keepCount": 1,
+    "testCount": 138,
+    "unknownCount": 1
+  },
+  "classifiedClasses": {
+    "keepCount": 1,
+    "testCount": 63,
+    "unknownCount": 1
+  }
+}
