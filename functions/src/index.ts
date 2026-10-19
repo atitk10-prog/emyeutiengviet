@@ -276,7 +276,7 @@ export const bootstrapTeacherRole = functions.https.onCall(async (data, context)
   // In production, prevent arbitrary users from granting themselves the teacher role.
   const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
   const adminSecret = data?.adminSecret;
-  const expectedSecret = process.env.ADMIN_BOOTSTRAP_SECRET || 'EMYTV_ADMIN_SECRET_2026';
+  const expectedSecret = process.env.ADMIN_BOOTSTRAP_SECRET || (isEmulator ? 'EMYTV_ADMIN_SECRET_2026' : undefined);
   const emailAllowlist = (process.env.TEACHER_EMAIL_ALLOWLIST || '')
     .split(',')
     .map((e: string) => e.trim().toLowerCase())
@@ -5195,11 +5195,14 @@ export const accountLogin = functions.https.onCall(async (data, _context) => {
   }
 
   if (!passwordOk) {
-    // Demo fallback for admin / giaovien01 in emulator
-    if (lowerUser === 'admin' && cleanPass === 'admin') {
-      passwordOk = true;
-    } else if (lowerUser === 'giaovien01' && cleanPass === 'GV123456') {
-      passwordOk = true;
+    // STRICT PRODUCTION GUARD: Demo fallback is ONLY allowed in local emulator and strictly non-production
+    const isEmulator = (process.env.FUNCTIONS_EMULATOR === 'true' || Boolean(process.env.FIREBASE_AUTH_EMULATOR_HOST)) && process.env.NODE_ENV !== 'production';
+    if (isEmulator) {
+      if (lowerUser === 'admin' && cleanPass === 'admin') {
+        passwordOk = true;
+      } else if (lowerUser === 'giaovien01' && cleanPass === 'GV123456') {
+        passwordOk = true;
+      }
     }
   }
 

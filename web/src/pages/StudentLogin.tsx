@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { httpsCallable } from 'firebase/functions';
 import { signInWithCustomToken, signOut } from 'firebase/auth';
-import { auth, functions } from '../firebase';
+import { auth } from '../firebase';
+import { createCallable } from '../services/apiClient';
 import { useAuth } from '../context/AuthContext';
 import { MascotBird } from '../components/MascotBird';
 import {
@@ -103,7 +103,7 @@ export const StudentLogin: React.FC = () => {
         await signOut(auth);
       }
 
-      const joinFunc = httpsCallable(functions, 'joinClass');
+      const joinFunc = createCallable('joinClass');
       const result: any = await joinFunc({
         classCode: classCode.trim().toUpperCase(),
         accessCode: accessCode.trim().toUpperCase()

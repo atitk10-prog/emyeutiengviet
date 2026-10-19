@@ -10,6 +10,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { functions, db } from '../firebase';
+import { createCallable } from '../services/apiClient';
 import { useAuth } from '../context/AuthContext';
 import {
   Classroom,
@@ -199,7 +200,7 @@ export const TeacherDashboard: React.FC = () => {
     if (!resetTargetStudent) return;
     setResettingStudentPass(true);
     try {
-      const resetFn = httpsCallable(functions, 'teacherResetStudentPassword');
+      const resetFn = createCallable('teacherResetStudentPassword');
       const res: any = await resetFn({
         studentId: resetTargetStudent.id,
         newPassword: newStudentPasswordInput.trim() || undefined
@@ -502,7 +503,7 @@ export const TeacherDashboard: React.FC = () => {
     if (!newClassName.trim()) return;
 
     try {
-      const createFunc = httpsCallable(functions, 'createClassroom');
+      const createFunc = createCallable('createClassroom');
       const res: any = await createFunc({
         name: newClassName.trim(),
         grade: newClassGrade,
@@ -538,7 +539,7 @@ export const TeacherDashboard: React.FC = () => {
     if (!editingClass || !editClassName.trim()) return;
     setIsSavingClassEdit(true);
     try {
-      const updateClassFn = httpsCallable(functions, 'updateClassroom');
+      const updateClassFn = createCallable('updateClassroom');
       const res: any = await updateClassFn({
         classId: editingClass.id,
         name: editClassName.trim(),
@@ -568,7 +569,7 @@ export const TeacherDashboard: React.FC = () => {
     if (!window.confirm(`Bạn có chắc chắn muốn ${actionName} lớp "${c.name}"?`)) return;
 
     try {
-      const archiveClassFn = httpsCallable(functions, 'archiveClassroom');
+      const archiveClassFn = createCallable('archiveClassroom');
       const res: any = await archiveClassFn({
         classId: c.id,
         status: newStatus
@@ -627,7 +628,7 @@ export const TeacherDashboard: React.FC = () => {
     if (!classDeleteTarget) return;
     setIsDeletingClass(true);
     try {
-      const deleteClassFn = httpsCallable(functions, 'deleteClassroom');
+      const deleteClassFn = createCallable('deleteClassroom');
       const res: any = await deleteClassFn({ classId: classDeleteTarget.id });
       if (res.data?.success) {
         setActionMessage({
@@ -749,7 +750,7 @@ export const TeacherDashboard: React.FC = () => {
     if (!selectedClass || !newStudentAlias.trim()) return;
 
     try {
-      const createStudent = httpsCallable(functions, 'createStudentAccess');
+      const createStudent = createCallable('createStudentAccess');
       const res: any = await createStudent({
         classId: selectedClass.id,
         displayAlias: newStudentAlias.trim(),
@@ -778,7 +779,7 @@ export const TeacherDashboard: React.FC = () => {
     }
 
     try {
-      const rotateFunc = httpsCallable(functions, 'rotateStudentAccess');
+      const rotateFunc = createCallable('rotateStudentAccess');
       const res: any = await rotateFunc({ studentId });
       if (res.data?.success) {
         setReissuedPinInfo({
@@ -800,7 +801,7 @@ export const TeacherDashboard: React.FC = () => {
 
     setLoading(true);
     try {
-      const toggleFunc = httpsCallable(functions, 'toggleStudentStatus');
+      const toggleFunc = createCallable('toggleStudentStatus');
       const res: any = await toggleFunc({ studentId, status: nextStatus });
       if (res.data?.success) {
         setActionMessage({
@@ -824,7 +825,7 @@ export const TeacherDashboard: React.FC = () => {
 
     setLoading(true);
     try {
-      const toggleFunc = httpsCallable(functions, 'toggleStudentStatus');
+      const toggleFunc = createCallable('toggleStudentStatus');
       const res: any = await toggleFunc({ studentId, status: nextStatus });
       if (res.data?.success) {
         setActionMessage({
@@ -846,7 +847,7 @@ export const TeacherDashboard: React.FC = () => {
     setDeletingStudent(true);
     setDeleteStudentError(null);
     try {
-      const deleteFn = httpsCallable(functions, 'deleteStudent');
+      const deleteFn = createCallable('deleteStudent');
       const res: any = await deleteFn({ studentId: deleteTargetStudent.id });
       if (res.data?.success) {
         setActionMessage({
@@ -868,7 +869,7 @@ export const TeacherDashboard: React.FC = () => {
     if (selectedStudentIds.length === 0) return;
     setIsProcessingBatchStudents(true);
     try {
-      const batchFn = httpsCallable(functions, 'batchUpdateStudents');
+      const batchFn = createCallable('batchUpdateStudents');
       const res: any = await batchFn({ studentIds: selectedStudentIds, action });
       if (res.data?.success) {
         setActionMessage({
@@ -894,7 +895,7 @@ export const TeacherDashboard: React.FC = () => {
 
     setSavingStudentEdit(true);
     try {
-      const updateFunc = httpsCallable(functions, 'updateStudentInfo');
+      const updateFunc = createCallable('updateStudentInfo');
       const res: any = await updateFunc({
         studentId: editingStudent.id,
         displayAlias: editingAlias.trim(),
@@ -922,7 +923,7 @@ export const TeacherDashboard: React.FC = () => {
 
     setTransferring(true);
     try {
-      const transFunc = httpsCallable(functions, 'transferStudentClass');
+      const transFunc = createCallable('transferStudentClass');
       const res: any = await transFunc({
         studentId: transferringStudent.id,
         targetClassId: targetTransferClassId,
@@ -1084,7 +1085,7 @@ export const TeacherDashboard: React.FC = () => {
     if (!selectedClass || excelPreviewData.length === 0) return;
     setImportingStudents(true);
     try {
-      const batchFunc = httpsCallable(functions, 'batchCreateStudents');
+      const batchFunc = createCallable('batchCreateStudents');
       const res: any = await batchFunc({
         classId: selectedClass.id,
         students: excelPreviewData

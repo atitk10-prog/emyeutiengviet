@@ -13,8 +13,8 @@ import {
   reauthenticateWithCredential
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { auth, db, functions } from '../firebase';
+import { auth, db } from '../firebase';
+import { createCallable } from '../services/apiClient';
 
 export interface StudentProfile {
   id: string;
@@ -103,7 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginWithAccount = async (username: string, pass: string) => {
     setLoading(true);
     try {
-      const accountLoginFn = httpsCallable(functions, 'accountLogin');
+      const accountLoginFn = createCallable('accountLogin');
       const res: any = await accountLoginFn({ username: username.trim(), password: pass });
       if (!res.data || !res.data.token) {
         throw new Error('Đăng nhập không thành công, vui lòng thử lại.');
@@ -148,7 +148,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const userDocRef = doc(db, 'users', res.user.uid);
       const docSnap = await getDoc(userDocRef);
       if (!docSnap.exists() || docSnap.data()?.role !== 'teacher') {
-        const bootstrap = httpsCallable(functions, 'bootstrapTeacherRole');
+        const bootstrap = createCallable('bootstrapTeacherRole');
         await bootstrap();
         setIsTeacher(true);
       } else {
@@ -175,7 +175,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const userDocRef = doc(db, 'users', res.user.uid);
       const docSnap = await getDoc(userDocRef);
       if (!docSnap.exists() || docSnap.data()?.role !== 'admin') {
-        const bootstrap = httpsCallable(functions, 'bootstrapAdminRole');
+        const bootstrap = createCallable('bootstrapAdminRole');
         await bootstrap({ adminSecret, displayName: 'Quản trị viên' });
         setIsAdmin(true);
         setIsTeacher(true);
@@ -193,7 +193,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     try {
       const cleanUsername = username.trim();
-      const registerFn = httpsCallable(functions, 'registerTeacherAccount');
+      const registerFn = createCallable('registerTeacherAccount');
       await registerFn({
         username: cleanUsername,
         password: pass,
@@ -206,7 +206,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const bootstrapRole = async (): Promise<string> => {
-    const bootstrap = httpsCallable(functions, 'bootstrapTeacherRole');
+    const bootstrap = createCallable('bootstrapTeacherRole');
     const res: any = await bootstrap();
     setIsTeacher(true);
     return res.data?.message || 'Thành công';
@@ -236,8 +236,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Mật khẩu mới phải có tối thiểu 6 ký tự.');
     }
 
-    // Call Cloud Function to update PBKDF2 hash and auth password
-    const changeFn = httpsCallable(functions, 'changeAccountPassword');
+    // Call Function to update PBKDF2 hash and auth password
+    const changeFn = createCallable('changeAccountPassword');
     const res: any = await changeFn({
       currentPassword: currentPass,
       newPassword: newPass
@@ -256,7 +256,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Mật khẩu mới phải có tối thiểu 6 ký tự.');
     }
 
-    const changeFn = httpsCallable(functions, 'studentChangePassword');
+    const changeFn = createCallable('studentChangePassword');
     const res: any = await changeFn({
       currentPassword: currentPass,
       newPassword: newPass

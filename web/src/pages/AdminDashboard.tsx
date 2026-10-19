@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../firebase';
+import { createCallable } from '../services/apiClient';
 import { useAuth } from '../context/AuthContext';
 import {
   AdminOverviewSummary,
@@ -538,7 +539,7 @@ export const AdminDashboard: React.FC = () => {
     if (!resetTargetTeacher) return;
     setIsResettingPass(true);
     try {
-      const resetFn = httpsCallable(functions, 'adminResetTeacherPassword');
+      const resetFn = createCallable('adminResetTeacherPassword');
       const res: any = await resetFn({
         targetUid: resetTargetTeacher.uid,
         newPassword: newTeacherPasswordInput.trim() || undefined
@@ -775,7 +776,7 @@ export const AdminDashboard: React.FC = () => {
       return;
     }
     try {
-      const resetFn = httpsCallable(functions, 'adminResetTeacherPassword');
+      const resetFn = createCallable('adminResetTeacherPassword');
       const res: any = await resetFn({ targetUid: teacher.uid });
       if (res.data?.success) {
         setResetPasswordResult({

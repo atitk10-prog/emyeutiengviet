@@ -13,6 +13,7 @@
     "build:shared": "npm run build --workspace=shared",
     "build:functions": "npm run build --workspace=functions",
     "build:web": "npm run build --workspace=web",
+    "build:vercel": "npm run build:shared && npm run build:web",
     "build": "npm run build --workspace=shared && npm run build --workspace=functions && npm run build --workspace=web",
     "dev": "npm run dev --workspace=web",
     "dev:web": "npm run dev --workspace=web",
@@ -32,6 +33,7 @@
     "typescript": "^5.5.0"
   },
   "dependencies": {
-    "exceljs": "^4.4.0"
+    "exceljs": "^4.4.0",
+    "firebase-admin": "^12.7.0"
   }
 }
