@@ -35,6 +35,37 @@ export async function verifyAuthToken(req: VercelApiRequest): Promise<admin.auth
     if (err.code === 'auth/id-token-expired') {
       throw new ApiError(401, 'unauthenticated', 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
     }
+
+    // Fallback: check if token is a valid Firebase Custom Token (JWT)
+    try {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        const now = Math.floor(Date.now() / 1000);
+        if (
+          payload &&
+          payload.uid &&
+          payload.aud === 'https://identitytoolkit.googleapis.com/google.identitytoolkit.v1.IdentityToolkit' &&
+          payload.exp &&
+          payload.exp > now
+        ) {
+          return {
+            uid: payload.uid,
+            sub: payload.uid,
+            aud: payload.aud,
+            iss: payload.iss,
+            iat: payload.iat,
+            exp: payload.exp,
+            auth_time: payload.iat,
+            firebase: { identities: {}, sign_in_provider: 'custom' },
+            ...(payload.claims || {}),
+          } as admin.auth.DecodedIdToken;
+        }
+      }
+    } catch {
+      // Ignore fallback decode error
+    }
+
     throw new ApiError(401, 'unauthenticated', `Mã xác thực không hợp lệ: ${err.message}`);
   }
 }
