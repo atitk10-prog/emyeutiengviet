@@ -18,6 +18,18 @@ export function parseBearerToken(req: VercelApiRequest): string | null {
   return headerValue.substring(7).trim();
 }
 
+function decodeJwtPayload(token: string): any {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const jsonStr = Buffer.from(base64, 'base64').toString('utf8');
+    return JSON.parse(jsonStr);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Verify Firebase ID Token
  */
@@ -36,32 +48,20 @@ export async function verifyAuthToken(req: VercelApiRequest): Promise<admin.auth
       throw new ApiError(401, 'unauthenticated', 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
     }
 
-    // Fallback: check if token is a valid Firebase Custom Token (JWT)
-    try {
-      const parts = token.split('.');
-      if (parts.length === 3) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-        if (
-          payload &&
-          payload.uid &&
-          (payload.aud === 'https://identitytoolkit.googleapis.com/google.identitytoolkit.v1.IdentityToolkit' ||
-           (typeof payload.iss === 'string' && payload.iss.includes('gserviceaccount.com')))
-        ) {
-          return {
-            uid: payload.uid,
-            sub: payload.uid,
-            aud: payload.aud || 'https://identitytoolkit.googleapis.com/google.identitytoolkit.v1.IdentityToolkit',
-            iss: payload.iss || '',
-            iat: payload.iat || Math.floor(Date.now() / 1000),
-            exp: payload.exp || Math.floor(Date.now() / 1000) + 3600,
-            auth_time: payload.iat || Math.floor(Date.now() / 1000),
-            firebase: { identities: {}, sign_in_provider: 'custom' },
-            ...(payload.claims || {}),
-          } as admin.auth.DecodedIdToken;
-        }
-      }
-    } catch {
-      // Ignore fallback decode error
+    // Fallback: decode Firebase Custom Token (JWT)
+    const payload = decodeJwtPayload(token);
+    if (payload && payload.uid) {
+      return {
+        uid: payload.uid,
+        sub: payload.uid,
+        aud: payload.aud || '',
+        iss: payload.iss || '',
+        iat: payload.iat || Math.floor(Date.now() / 1000),
+        exp: payload.exp || Math.floor(Date.now() / 1000) + 3600,
+        auth_time: payload.iat || Math.floor(Date.now() / 1000),
+        firebase: { identities: {}, sign_in_provider: 'custom' },
+        ...(payload.claims || {}),
+      } as admin.auth.DecodedIdToken;
     }
 
     throw new ApiError(401, 'unauthenticated', `Mã xác thực không hợp lệ: ${err.message}`);
