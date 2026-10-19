@@ -40,6 +40,8 @@ web/public/audio/uploads/
 serviceAccountKey*.json
 *serviceAccount*.json
 *credential*.json
+*-adminsdk-*.json
+*firebase-adminsdk*.json
 
 # Local Runtimes & Third-Party Evaluation Tools
 .jdk21/

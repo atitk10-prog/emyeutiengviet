@@ -113,6 +113,10 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
         result = await handleBootstrapAdminRole(req, data);
         break;
 
+      case 'bootstrapAdminAccount':
+        result = await handleBootstrapAdminAccount(req, data);
+        break;
+
       default:
         throw new ApiError(
           400,
@@ -1074,5 +1078,199 @@ async function handleBootstrapAdminRole(req: VercelApiRequest, data: any) {
   return {
     success: true,
     message: `Đã cấp quyền Quản trị viên (Admin) thành công cho tài khoản ${email || uid}.`
+  };
+}
+
+// ==========================================
+// 10. BOOTSTRAP / RESET ADMIN ACCOUNT
+// ==========================================
+async function handleBootstrapAdminAccount(req: VercelApiRequest, data: any) {
+  const { actionType, adminSecret, username, password, displayName } = data || {};
+
+  const db = getDb();
+  const auth = getAuth();
+
+  // 1. ActionType: 'check' -> Kiểm tra trạng thái tài khoản Admin hiện có
+  if (actionType === 'check') {
+    const [adminUsersSnap, adminUsernameDoc] = await Promise.all([
+      db.collection('users').where('role', '==', 'admin').limit(1).get(),
+      db.collection('usernames').doc('admin').get()
+    ]);
+
+    const hasAdmin = !adminUsersSnap.empty || adminUsernameDoc.exists;
+    let existingAdminUsername = '';
+    if (adminUsernameDoc.exists) {
+      existingAdminUsername = 'admin';
+    } else if (!adminUsersSnap.empty) {
+      existingAdminUsername = adminUsersSnap.docs[0].data().username || adminUsersSnap.docs[0].id;
+    }
+
+    return {
+      success: true,
+      hasAdmin,
+      adminUsername: existingAdminUsername || null
+    };
+  }
+
+  // 2. ActionType: 'setup' -> Khởi tạo hoặc đặt lại mật khẩu Admin
+  const isEmulator = isLocalEmulator();
+  const expectedSecret =
+    process.env.ADMIN_BOOTSTRAP_SECRET ||
+    (isEmulator ? 'EMYTV_ADMIN_SECRET_2026' : undefined);
+
+  if (!expectedSecret) {
+    throw new ApiError(
+      500,
+      'failed-precondition',
+      'Máy chủ chưa được cấu hình biến môi trường ADMIN_BOOTSTRAP_SECRET. Vui lòng cấu hình trên Vercel.'
+    );
+  }
+
+  // Yêu cầu adminSecret chính xác
+  const inputSecret = String(adminSecret || '').trim();
+  const targetSecret = String(expectedSecret).trim();
+
+  if (!inputSecret || inputSecret !== targetSecret) {
+    await recordAuthFailure('rate_limit_admin_bootstrap', 'ip_admin_bootstrap');
+    throw new ApiError(
+      403,
+      'permission-denied',
+      'Mã bảo mật Quản trị viên (adminSecret) không chính xác.'
+    );
+  }
+
+  const cleanUser = String(username || 'admin').trim().toLowerCase();
+  const cleanPass = String(password || '').trim();
+  const cleanName = String(displayName || 'Quản Trị Viên Hệ Thống').trim();
+
+  if (!cleanUser || cleanUser.length < 3) {
+    throw new ApiError(400, 'invalid-argument', 'Tên đăng nhập Admin phải có tối thiểu 3 ký tự.');
+  }
+
+  if (!cleanPass || cleanPass.length < 8) {
+    throw new ApiError(400, 'invalid-argument', 'Mật khẩu Admin phải có tối thiểu 8 ký tự để đảm bảo an toàn.');
+  }
+
+  const hasNumber = /\d/.test(cleanPass);
+  const hasLetter = /[a-zA-Z]/.test(cleanPass);
+  if (!hasNumber || !hasLetter) {
+    throw new ApiError(400, 'invalid-argument', 'Mật khẩu Admin phải bao gồm cả chữ và số.');
+  }
+
+  const now = Date.now();
+  const internalEmail = `${cleanUser}@emytv.local`;
+
+  // Kiểm tra tài khoản admin hiện tại trong usernames hoặc users
+  const existingUsernameDoc = await db.collection('usernames').doc(cleanUser).get();
+  let adminUid = existingUsernameDoc.exists ? existingUsernameDoc.data()?.uid : null;
+
+  if (!adminUid) {
+    // Kiểm tra xem đã có admin nào khác tên không
+    const otherAdmins = await db.collection('users').where('role', '==', 'admin').limit(1).get();
+    if (!otherAdmins.empty && otherAdmins.docs[0].data().username !== cleanUser) {
+      const existingName = otherAdmins.docs[0].data().username || 'khác';
+      throw new ApiError(
+        409,
+        'already-exists',
+        `Hệ thống đã có tài khoản Quản trị viên tồn tại (tên đăng nhập: "${existingName}"). Mỗi trường chỉ duy trì 1 tài khoản Admin chính.`
+      );
+    }
+  }
+
+  // Đồng bộ Firebase Auth
+  if (adminUid) {
+    try {
+      await auth.updateUser(adminUid, {
+        password: cleanPass,
+        displayName: cleanName,
+        email: internalEmail
+      });
+    } catch (e: any) {
+      if (e.code === 'auth/user-not-found') {
+        const newRecord = await auth.createUser({
+          uid: adminUid,
+          email: internalEmail,
+          password: cleanPass,
+          displayName: cleanName
+        });
+        adminUid = newRecord.uid;
+      }
+    }
+  } else {
+    try {
+      const existingAuthUser = await auth.getUserByEmail(internalEmail);
+      adminUid = existingAuthUser.uid;
+      await auth.updateUser(adminUid, {
+        password: cleanPass,
+        displayName: cleanName
+      });
+    } catch {
+      const newRecord = await auth.createUser({
+        email: internalEmail,
+        password: cleanPass,
+        displayName: cleanName
+      });
+      adminUid = newRecord.uid;
+    }
+  }
+
+  // Set custom claims: role admin
+  await auth.setCustomUserClaims(adminUid, { role: 'admin' });
+
+  // Tạo OWASP Version 2 PBKDF2 hash (600,000 vòng)
+  const secretRecord = createPasswordHashRecord(cleanPass);
+
+  const batch = db.batch();
+
+  // 1. accountSecrets
+  batch.set(
+    db.collection('accountSecrets').doc(adminUid),
+    {
+      uid: adminUid,
+      ...secretRecord,
+      updatedAt: now
+    },
+    { merge: true }
+  );
+
+  // 2. users
+  batch.set(
+    db.collection('users').doc(adminUid),
+    {
+      uid: adminUid,
+      username: cleanUser,
+      displayName: cleanName,
+      role: 'admin',
+      status: 'active',
+      internalEmail,
+      updatedAt: now,
+      createdAt: existingUsernameDoc.exists ? (existingUsernameDoc.data()?.createdAt || now) : now
+    },
+    { merge: true }
+  );
+
+  // 3. usernames
+  batch.set(
+    db.collection('usernames').doc(cleanUser),
+    {
+      username: cleanUser,
+      uid: adminUid,
+      role: 'admin',
+      internalEmail,
+      updatedAt: now,
+      createdAt: existingUsernameDoc.exists ? (existingUsernameDoc.data()?.createdAt || now) : now
+    },
+    { merge: true }
+  );
+
+  await batch.commit();
+
+  return {
+    success: true,
+    isUpdate: existingUsernameDoc.exists,
+    username: cleanUser,
+    message: existingUsernameDoc.exists
+      ? `Đã cập nhật mật khẩu mới an toàn cho tài khoản Quản trị viên "${cleanUser}" thành công!`
+      : `Đã khởi tạo tài khoản Quản trị viên "${cleanUser}" thành công!`
   };
 }

@@ -17,7 +17,8 @@ export const MIGRATED_AUTH_ACTIONS = new Set<string>([
   'adminResetTeacherPassword',
   'joinClass',
   'bootstrapTeacherRole',
-  'bootstrapAdminRole'
+  'bootstrapAdminRole',
+  'bootstrapAdminAccount'
 ]);
 
 // Migrated actions in Phase 2B.2 (/api/classrooms)
