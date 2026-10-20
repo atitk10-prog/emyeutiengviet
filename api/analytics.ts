@@ -289,7 +289,7 @@ async function handleGetTeacherAnalytics(req: VercelApiRequest, data: any) {
       const map: Record<string, string> = {};
       if (vData && vData.publicQuestions) {
         vData.publicQuestions.forEach((q: any) => {
-          map[q.id] = q.skillTag || 'thong_tin_truc_tiep';
+          map[q.id] = q.skillTag || '';
         });
       }
       versionSkillCache[vId] = map;
@@ -599,7 +599,7 @@ async function handleExportTeacherData(req: VercelApiRequest, data: any) {
       const map: Record<string, string> = {};
       if (vData && vData.publicQuestions) {
         vData.publicQuestions.forEach((q: any) => {
-          map[q.id] = q.skillTag || 'thong_tin_truc_tiep';
+          map[q.id] = q.skillTag || '';
         });
       }
       versionSkillCache[vId] = map;
@@ -870,7 +870,7 @@ async function handleSuggestRemediation(req: VercelApiRequest, data: any) {
       const map: Record<string, string> = {};
       if (vData && vData.publicQuestions) {
         vData.publicQuestions.forEach((q: any) => {
-          map[q.id] = q.skillTag || 'thong_tin_truc_tiep';
+          map[q.id] = q.skillTag || '';
         });
       }
       versionSkillCache[vId] = map;
@@ -914,7 +914,7 @@ async function handleSuggestRemediation(req: VercelApiRequest, data: any) {
           questionErrorAcc[qId] = {
             questionId: qId,
             prompt: r.prompt || `Câu hỏi ${qId}`,
-            skillTag: skill || 'thong_tin_truc_tiep',
+            skillTag: skill || 'chua_phan_loai',
             totalAnswered: 0,
             firstTryIncorrect: 0
           };
