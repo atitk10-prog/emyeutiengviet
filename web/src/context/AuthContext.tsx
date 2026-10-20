@@ -67,28 +67,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
-        // Check teacher/admin status in Firestore
+        setLoading(true);
         try {
-          const userDocRef = doc(db, 'users', currentUser.uid);
-          const docSnap = await getDoc(userDocRef);
-          const role = docSnap.exists() ? docSnap.data()?.role : null;
-          if (role === 'admin') {
+          // 1. Prioritize ID token claims (fast, reliable, zero permission-denied failures)
+          const idTokenResult = await currentUser.getIdTokenResult();
+          const claimRole = idTokenResult.claims.role;
+          if (claimRole === 'admin') {
             setIsAdmin(true);
             setIsTeacher(true);
-          } else if (role === 'teacher') {
+          } else if (claimRole === 'teacher') {
             setIsTeacher(true);
             setIsAdmin(false);
+          } else if (claimRole === 'student') {
+            setIsTeacher(false);
+            setIsAdmin(false);
           } else {
-            // Check ID token claims
-            const idTokenResult = await currentUser.getIdTokenResult(true);
-            const claimRole = idTokenResult.claims.role;
-            setIsAdmin(claimRole === 'admin');
-            setIsTeacher(claimRole === 'teacher' || claimRole === 'admin');
+            // 2. Fallback: Check teacher/admin status in Firestore users doc
+            try {
+              const userDocRef = doc(db, 'users', currentUser.uid);
+              const docSnap = await getDoc(userDocRef);
+              const role = docSnap.exists() ? docSnap.data()?.role : null;
+              if (role === 'admin') {
+                setIsAdmin(true);
+                setIsTeacher(true);
+              } else if (role === 'teacher') {
+                setIsTeacher(true);
+                setIsAdmin(false);
+              } else {
+                setIsTeacher(false);
+                setIsAdmin(false);
+              }
+            } catch (fsErr) {
+              console.warn('[AuthContext] Firestore role read skipped/denied:', fsErr);
+            }
           }
         } catch (e) {
-          console.warn('Could not fetch user role:', e);
-          setIsTeacher(false);
-          setIsAdmin(false);
+          console.warn('[AuthContext] Error determining user role:', e);
         }
       } else {
         setIsTeacher(false);
@@ -109,7 +123,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         throw new Error('Đăng nhập không thành công, vui lòng thử lại.');
       }
 
-      await signInWithCustomToken(auth, res.data.token);
+      const userCred = await signInWithCustomToken(auth, res.data.token);
+      // Immediately set user in state to prevent route guard bounce
+      setUser(userCred.user);
+
+      // Force-refresh ID token so custom claims are immediately populated
+      try {
+        await userCred.user.getIdTokenResult(true);
+      } catch (tokenErr) {
+        console.warn('[AuthContext] getIdTokenResult error:', tokenErr);
+      }
 
       if (res.data.role === 'admin') {
         setIsAdmin(true);
@@ -281,10 +304,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    await signOut(auth);
-    setStudentSessionData(null);
-    setIsTeacher(false);
-    setIsAdmin(false);
+    setLoading(true);
+    try {
+      await signOut(auth);
+      setUser(null);
+      setStudentSessionData(null);
+      setIsTeacher(false);
+      setIsAdmin(false);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

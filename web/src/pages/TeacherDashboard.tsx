@@ -385,28 +385,56 @@ export const TeacherDashboard: React.FC = () => {
         console.warn('Could not fetch analytics:', e);
       }
 
-      // 2. Fetch Classes
-      if (user) {
-        const qClasses = query(
-          collection(db, 'classes'),
-          where('teacherUid', '==', user.uid)
-        );
-        const snapClasses = await getDocs(qClasses);
-        const classList: Classroom[] = [];
-        snapClasses.forEach((d) => classList.push(d.data() as Classroom));
-        classList.sort((a, b) => a.grade - b.grade || a.name.localeCompare(b.name));
-        setClasses(classList);
-        if (classList.length > 0 && selectedClass) {
-          const fresh = classList.find((c) => c.id === selectedClass.id);
-          if (fresh) {
-            setSelectedClass(fresh);
-          } else {
-            setSelectedClass(null);
-            setStudents([]);
+      // 2. Fetch Classes via getTeacherClasses API (handles auth permissions reliably)
+      try {
+        const getClassesFn = createCallable('getTeacherClasses');
+        const cRes: any = await getClassesFn({});
+        if (cRes.data?.classes) {
+          const classList: Classroom[] = cRes.data.classes;
+          classList.sort((a, b) => a.grade - b.grade || a.name.localeCompare(b.name));
+          setClasses(classList);
+          if (classList.length > 0 && selectedClass) {
+            const fresh = classList.find((c) => c.id === selectedClass.id);
+            if (fresh) {
+              setSelectedClass(fresh);
+            } else {
+              setSelectedClass(null);
+              setStudents([]);
+            }
+          }
+        } else {
+          throw new Error('API returned no classes');
+        }
+      } catch (cErr) {
+        console.warn('API getTeacherClasses fallback to client Firestore:', cErr);
+        if (user) {
+          try {
+            const qClasses = query(
+              collection(db, 'classes'),
+              where('teacherUid', '==', user.uid)
+            );
+            const snapClasses = await getDocs(qClasses);
+            const classList: Classroom[] = [];
+            snapClasses.forEach((d) => classList.push(d.data() as Classroom));
+            classList.sort((a, b) => a.grade - b.grade || a.name.localeCompare(b.name));
+            setClasses(classList);
+            if (classList.length > 0 && selectedClass) {
+              const fresh = classList.find((c) => c.id === selectedClass.id);
+              if (fresh) {
+                setSelectedClass(fresh);
+              } else {
+                setSelectedClass(null);
+                setStudents([]);
+              }
+            }
+          } catch (snapErr) {
+            console.warn('Firestore client class query also failed:', snapErr);
           }
         }
+      }
 
-        // 3. Fetch Lessons via getTeacherLessons Cloud Function
+      // 3. Fetch Lessons via getTeacherLessons Cloud Function
+      if (user) {
         try {
           const getLessonsFunc = httpsCallable(functions, 'getTeacherLessons');
           const lRes: any = await getLessonsFunc({ status: 'all' });
@@ -417,14 +445,18 @@ export const TeacherDashboard: React.FC = () => {
           }
         } catch (lErr) {
           console.warn('Falling back to Firestore direct query for lessons:', lErr);
-          const qLessons = query(
-            collection(db, 'lessons'),
-            where('teacherUid', 'in', [user.uid, 'seed_teacher_uid', 'system'])
-          );
-          const snapLessons = await getDocs(qLessons);
-          const lessonList: Lesson[] = [];
-          snapLessons.forEach((d) => lessonList.push(d.data() as Lesson));
-          setLessons(lessonList);
+          try {
+            const qLessons = query(
+              collection(db, 'lessons'),
+              where('teacherUid', 'in', [user.uid, 'seed_teacher_uid', 'system'])
+            );
+            const snapLessons = await getDocs(qLessons);
+            const lessonList: Lesson[] = [];
+            snapLessons.forEach((d) => lessonList.push(d.data() as Lesson));
+            setLessons(lessonList);
+          } catch (lsErr) {
+            console.warn('Firestore direct query for lessons failed:', lsErr);
+          }
         }
       }
     } catch (err: any) {
@@ -435,6 +467,17 @@ export const TeacherDashboard: React.FC = () => {
   };
 
   const loadStudentsForClass = async (classId: string) => {
+    try {
+      const getStudentsFn = createCallable('getStudentsByClass');
+      const res: any = await getStudentsFn({ classId });
+      if (res.data?.students) {
+        setStudents(res.data.students);
+        return;
+      }
+    } catch (apiErr) {
+      console.warn('API getStudentsByClass failed, falling back to Firestore client:', apiErr);
+    }
+
     try {
       const qStudents = query(
         collection(db, 'students'),
@@ -2364,10 +2407,11 @@ export const TeacherDashboard: React.FC = () => {
   const chartData = hasAttempts && analytics?.skillBreakdown
     ? Object.keys(analytics.skillBreakdown).map((k) => {
         const item = analytics.skillBreakdown[k];
-        const firstTry = item.firstTryPercentage ?? item.percentage ?? 0;
-        const finalVal = item.finalPercentage ?? (item.totalTested > 0 ? Math.round((item.finalCorrect / item.totalTested) * 100) : firstTry);
+        const firstTry = item.firstTryAccuracy ?? item.firstTryPercentage ?? item.percentage ?? 0;
+        const totalTested = item.testedCount ?? item.totalTested ?? item.tested ?? 0;
+        const finalVal = item.finalAccuracy ?? item.finalPercentage ?? (totalTested > 0 ? Math.round(((item.finalCorrect || 0) / totalTested) * 100) : firstTry);
         return {
-          skill: SKILL_LABELS[k as SkillTag] || k,
+          skill: SKILL_LABELS[k as SkillTag] || item.label || k,
           firstTry,
           final: finalVal,
           progress: Math.max(0, finalVal - firstTry)

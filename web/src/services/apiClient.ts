@@ -27,7 +27,8 @@ export const MIGRATED_CLASSROOM_ACTIONS = new Set<string>([
   'updateClassroom',
   'archiveClassroom',
   'deleteClassroom',
-  'checkClassCode'
+  'checkClassCode',
+  'getTeacherClasses'
 ]);
 
 // Migrated actions in /api/students
@@ -39,7 +40,8 @@ export const MIGRATED_STUDENT_ACTIONS = new Set<string>([
   'deleteStudent',
   'batchUpdateStudents',
   'transferStudentClass',
-  'batchCreateStudents'
+  'batchCreateStudents',
+  'getStudentsByClass'
 ]);
 
 // Migrated actions in /api/lessons

@@ -227,11 +227,19 @@ async function handleGetTeacherAnalytics(req: VercelApiRequest, data: any) {
 
   const skillBreakdown: Record<string, any> = {};
   for (const [k, v] of Object.entries(skillAccumulator)) {
+    const firstAcc = v.tested > 0 ? Math.round((v.firstTryCorrect / v.tested) * 100) : 0;
+    const finalAcc = v.tested > 0 ? Math.round((v.finalCorrect / v.tested) * 100) : 0;
     skillBreakdown[k] = {
       label: v.label,
       testedCount: v.tested,
-      firstTryAccuracy: v.tested > 0 ? Math.round((v.firstTryCorrect / v.tested) * 100) : 0,
-      finalAccuracy: v.tested > 0 ? Math.round((v.finalCorrect / v.tested) * 100) : 0
+      totalTested: v.tested,
+      firstTryAccuracy: firstAcc,
+      firstTryPercentage: firstAcc,
+      percentage: firstAcc,
+      finalAccuracy: finalAcc,
+      finalPercentage: finalAcc,
+      firstTryCorrect: v.firstTryCorrect,
+      finalCorrect: v.finalCorrect
     };
   }
 

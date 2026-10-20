@@ -71,6 +71,10 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
         result = await handleCheckClassCode(req, data);
         break;
 
+      case 'getTeacherClasses':
+        result = await handleGetTeacherClasses(req);
+        break;
+
       default:
         throw new ApiError(
           400,
@@ -314,3 +318,22 @@ async function handleCheckClassCode(req: VercelApiRequest, data: any) {
     exists: duplicates.length > 0
   };
 }
+
+// ==========================================
+// 6. GET TEACHER CLASSES
+// ==========================================
+async function handleGetTeacherClasses(req: VercelApiRequest) {
+  const { uid: teacherUid, role } = await requireTeacherOrAdmin(req);
+  const db = getDb();
+  let query: FirebaseFirestore.Query = db.collection('classes');
+  if (role !== 'admin') {
+    query = query.where('teacherUid', '==', teacherUid);
+  }
+  const snap = await query.get();
+  const classes = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return {
+    success: true,
+    classes
+  };
+}
+

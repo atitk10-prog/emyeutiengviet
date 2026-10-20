@@ -88,6 +88,10 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
         result = await handleBatchCreateStudents(req, data);
         break;
 
+      case 'getStudentsByClass':
+        result = await handleGetStudentsByClass(req, data);
+        break;
+
       default:
         throw new ApiError(
           400,
@@ -859,3 +863,28 @@ async function handleBatchCreateStudents(req: VercelApiRequest, data: any) {
     warnings: errors
   };
 }
+
+// ==========================================
+// 9. GET STUDENTS BY CLASS
+// ==========================================
+async function handleGetStudentsByClass(req: VercelApiRequest, data: any) {
+  const { uid: teacherUid, role } = await requireTeacherOrAdmin(req);
+  const { classId } = data || {};
+  if (!classId) {
+    throw new ApiError(400, 'invalid-argument', 'Yêu cầu cung cấp mã định danh lớp học (classId).');
+  }
+
+  const db = getDb();
+  if (role !== 'admin') {
+    const classDoc = await db.collection('classes').doc(classId).get();
+    if (!classDoc.exists || classDoc.data()?.teacherUid !== teacherUid) {
+      throw new ApiError(403, 'permission-denied', 'Không có quyền truy cập danh sách học sinh của lớp này.');
+    }
+  }
+
+  const studentsSnap = await db.collection('students').where('classId', '==', classId).get();
+  const students = studentsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  students.sort((a: any, b: any) => (a.studentCode || '').localeCompare(b.studentCode || ''));
+  return { success: true, students };
+}
+
