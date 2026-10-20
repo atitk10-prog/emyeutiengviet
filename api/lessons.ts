@@ -58,6 +58,10 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
         result = await handleGetLessonDetail(req, data);
         break;
 
+      case 'generateLessonDraft':
+        result = await handleGenerateLessonDraft(req, data);
+        break;
+
       case 'saveLessonDraft':
         result = await handleSaveLessonDraft(req, data);
         break;
@@ -601,6 +605,101 @@ async function handleAssignLesson(req: VercelApiRequest, data: any) {
     assignment: createdAssignments[0] || preventedDuplicates[0]?.assignment,
     assignments: createdAssignments,
     message: `Đã giao bài thành công cho ${createdAssignments.length} lớp học.`
+  };
+}
+
+// 8b. GENERATE LESSON DRAFT WITH GEMINI AI
+async function handleGenerateLessonDraft(req: VercelApiRequest, data: any) {
+  await requireTeacher(req);
+  const {
+    grade,
+    topic,
+    genre,
+    readingGoal,
+    targetWordCount,
+    questionCount
+  } = data || {};
+
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY;
+  if (!apiKey) {
+    throw new ApiError(
+      503,
+      'failed-precondition',
+      'Chưa cấu hình GEMINI_API_KEY trên môi trường Vercel. Vui lòng cấu hình biến môi trường GEMINI_API_KEY trong Project Settings hoặc sử dụng chức năng Soạn thủ công.'
+    );
+  }
+
+  const safeTopic = String(topic || 'Tình cảm gia đình').replace(/[\r\n\t]+/g, ' ').slice(0, 100);
+  const targetGrade = Number(grade || 2);
+  const wordCount = targetWordCount || (targetGrade === 2 ? 140 : 180);
+  const totalQuestions = questionCount || 5;
+
+  const prompt = `Bạn là chuyên gia sư phạm tiểu học môn Tiếng Việt cho học sinh lớp ${targetGrade}.
+Hãy tạo một bài đọc hiểu mới hoàn chỉnh bằng Tiếng Việt theo chuẩn chương trình GDPT 2018.
+Chủ đề: "${safeTopic}". Thể loại: ${genre === 'informational' ? 'Văn bản thông tin' : 'Văn bản tự sự / Truyện ngắn'}.
+${readingGoal ? `Mục tiêu đọc hiểu: ${readingGoal}` : ''}
+Độ dài bài đọc: khoảng ${wordCount} từ. Giọng văn trong sáng, dễ hiểu, giàu cảm xúc, không sao chép nguyên văn SGK.
+Có 2-3 từ vựng khó được giải nghĩa.
+Đúng ${totalQuestions} câu hỏi đọc hiểu gồm 3 dạng:
+1. multiple_choice: 3 lựa chọn options (A, B, C), answer là 'A' hoặc 'B' hoặc 'C'.
+2. true_false: có statement, answer là true hoặc false.
+3. sequence: có items là 3 sự việc cần sắp xếp theo trình tự thời gian, answer là mảng [0, 1, 2] hoặc tương tự biểu diễn thứ tự đúng.
+Mỗi câu hỏi có: id, type, prompt, answer, hint, explanation, skillTag (thong_tin_truc_tiep, tu_trong_ngu_canh, noi_dung_chinh, sap_xep_trinh_tu, lien_he_van_dung), difficulty (nhan_biet, thong_hieu, van_dung).
+Trả về duy nhất định dạng JSON thuần dạng:
+{
+  "title": "Tên bài đọc",
+  "passage": "Nội dung bài đọc...",
+  "grade": ${targetGrade},
+  "topic": "${safeTopic}",
+  "genre": "${genre || 'narrative'}",
+  "vocabulary": [
+    {"word": "từ khó 1", "meaning": "nghĩa", "example": "ví dụ"},
+    {"word": "từ khó 2", "meaning": "nghĩa", "example": "ví dụ"}
+  ],
+  "questions": [ ... ]
+}`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: prompt }]
+          }
+        ],
+        generationConfig: {
+          responseMimeType: 'application/json'
+        }
+      })
+    }
+  );
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new ApiError(502, 'internal', `Lỗi từ dịch vụ Gemini AI (${response.status}): ${errText.slice(0, 200)}`);
+  }
+
+  const resData = await response.json();
+  const rawText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!rawText) {
+    throw new ApiError(500, 'internal', 'Gemini AI không trả về nội dung bài đọc.');
+  }
+
+  let draft: any;
+  try {
+    draft = JSON.parse(rawText);
+  } catch {
+    throw new ApiError(500, 'internal', 'Không thể phân tích định dạng JSON từ Gemini AI.');
+  }
+
+  return {
+    success: true,
+    draft,
+    isAiGenerated: true
   };
 }
 

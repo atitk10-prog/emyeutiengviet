@@ -48,6 +48,7 @@ export const MIGRATED_STUDENT_ACTIONS = new Set<string>([
 export const MIGRATED_LESSON_ACTIONS = new Set<string>([
   'getTeacherLessons',
   'getLessonDetail',
+  'generateLessonDraft',
   'saveLessonDraft',
   'publishLesson',
   'archiveLesson',
