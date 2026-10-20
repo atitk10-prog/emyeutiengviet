@@ -5,13 +5,20 @@ import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
 const metaEnv = (typeof import.meta !== 'undefined' && (import.meta as any).env) || {};
 
+// Connect to Local Firebase Emulators when configured
+// In development, default to emulator unless explicitly disabled with 'false'.
+// In production, NEVER connect to emulator unless explicitly set to 'true'.
+const useEmulator = metaEnv.DEV
+  ? metaEnv.VITE_USE_FIREBASE_EMULATOR !== 'false'
+  : metaEnv.VITE_USE_FIREBASE_EMULATOR === 'true';
+
 const firebaseConfig = {
-  apiKey: metaEnv.VITE_FIREBASE_API_KEY || 'AIzaSyDemoDummyKeyForEmulatorUsageOnly123',
-  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || 'em-yeu-tieng-viet-demo.firebaseapp.com',
-  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || 'em-yeu-tieng-viet-demo',
-  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || 'em-yeu-tieng-viet-demo.appspot.com',
-  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || '1234567890',
-  appId: metaEnv.VITE_FIREBASE_APP_ID || '1:1234567890:web:abcdef123456'
+  apiKey: metaEnv.VITE_FIREBASE_API_KEY || (useEmulator ? 'AIzaSyDemoDummyKeyForEmulatorUsageOnly123' : 'AIzaSyB8T4cebLbZCX2Je--ndjaeHl_l8wo6spw'),
+  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || (useEmulator ? 'em-yeu-tieng-viet-demo.firebaseapp.com' : 'em-yeu-tieng-viet---staging.firebaseapp.com'),
+  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || (useEmulator ? 'em-yeu-tieng-viet-demo' : 'em-yeu-tieng-viet---staging'),
+  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || (useEmulator ? 'em-yeu-tieng-viet-demo.appspot.com' : 'em-yeu-tieng-viet---staging.firebasestorage.app'),
+  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || (useEmulator ? '1234567890' : '758607123287'),
+  appId: metaEnv.VITE_FIREBASE_APP_ID || (useEmulator ? '1:1234567890:web:abcdef123456' : '1:758607123287:web:f53f8b67be3b2c59bd2412')
 };
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -19,13 +26,6 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const functions = getFunctions(app);
-
-// Connect to Local Firebase Emulators when configured
-// In development, default to emulator unless explicitly disabled with 'false'.
-// In production, NEVER connect to emulator unless explicitly set to 'true'.
-const useEmulator = metaEnv.DEV
-  ? metaEnv.VITE_USE_FIREBASE_EMULATOR !== 'false'
-  : metaEnv.VITE_USE_FIREBASE_EMULATOR === 'true';
 const emulatorHost = metaEnv.VITE_FIREBASE_EMULATOR_HOST || 'localhost';
 
 // Prevent multiple emulator attachments during hot-module reload

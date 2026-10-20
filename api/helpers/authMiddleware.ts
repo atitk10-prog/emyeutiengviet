@@ -18,20 +18,10 @@ export function parseBearerToken(req: VercelApiRequest): string | null {
   return headerValue.substring(7).trim();
 }
 
-function decodeJwtPayload(token: string): any {
-  try {
-    const parts = token.split('.');
-    if (parts.length < 2) return null;
-    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const jsonStr = Buffer.from(base64, 'base64').toString('utf8');
-    return JSON.parse(jsonStr);
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Verify Firebase ID Token
+ * Strictly enforces cryptographic verification via Firebase Admin SDK.
+ * Unverified JWT payloads, forged tokens, and custom tokens used as ID tokens are 100% rejected.
  */
 export async function verifyAuthToken(req: VercelApiRequest): Promise<admin.auth.DecodedIdToken> {
   const token = parseBearerToken(req);
@@ -47,23 +37,9 @@ export async function verifyAuthToken(req: VercelApiRequest): Promise<admin.auth
     if (err.code === 'auth/id-token-expired') {
       throw new ApiError(401, 'unauthenticated', 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
     }
-
-    // Fallback: decode Firebase Custom Token (JWT)
-    const payload = decodeJwtPayload(token);
-    if (payload && payload.uid) {
-      return {
-        uid: payload.uid,
-        sub: payload.uid,
-        aud: payload.aud || '',
-        iss: payload.iss || '',
-        iat: payload.iat || Math.floor(Date.now() / 1000),
-        exp: payload.exp || Math.floor(Date.now() / 1000) + 3600,
-        auth_time: payload.iat || Math.floor(Date.now() / 1000),
-        firebase: { identities: {}, sign_in_provider: 'custom' },
-        ...(payload.claims || {}),
-      } as admin.auth.DecodedIdToken;
+    if (err.code === 'auth/argument-error' || err.code === 'auth/invalid-id-token') {
+      throw new ApiError(401, 'unauthenticated', 'Mã xác thực không hợp lệ hoặc sai định dạng chữ ký số.');
     }
-
     throw new ApiError(401, 'unauthenticated', `Mã xác thực không hợp lệ: ${err.message}`);
   }
 }
