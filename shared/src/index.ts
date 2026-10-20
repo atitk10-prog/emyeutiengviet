@@ -903,6 +903,8 @@ export interface AdminOverviewSummary {
   totalStudents: number;
   totalLessons: number;
   totalAttempts: number;
+  completedAttempts?: number;
+  inProgressAttempts?: number;
   aiServiceStatus: AIServiceStatus;
   curriculumCoverage: Record<CurriculumGrade, number>;
   academicYearsList?: string[];

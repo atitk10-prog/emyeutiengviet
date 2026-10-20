@@ -940,7 +940,7 @@ export const AdminDashboard: React.FC = () => {
             }`}
           >
             <Layers className="w-4 h-4" />
-            <span>Ngân hàng GDPT Lớp 1–5</span>
+            <span>Ngân hàng chương trình GDPT — Lớp 2–3</span>
           </button>
         </div>
 
@@ -998,7 +998,9 @@ export const AdminDashboard: React.FC = () => {
                 <span className="text-2xl font-black text-slate-900 mt-1 block">
                   {overview?.totalAttempts || 0}
                 </span>
-                <span className="text-[10px] text-purple-600 font-bold">Firestore verified</span>
+                <span className="text-[10px] text-purple-600 font-bold">
+                  {overview?.completedAttempts ? `${overview.completedAttempts} hoàn thành · ${overview?.inProgressAttempts || 0} đang làm` : 'Firestore verified'}
+                </span>
               </div>
 
               <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm">
@@ -1093,15 +1095,15 @@ export const AdminDashboard: React.FC = () => {
             )}
 
 
-            {/* Curriculum coverage across Grades 1-5 */}
+            {/* Curriculum coverage across Grades 2-3 */}
             <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm">
               <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide mb-4 flex items-center gap-2">
                 <Layers className="w-4 h-4 text-emerald-600" />
-                <span>Bao phủ Khung Chương trình GDPT (Bộ sách Kết nối tri thức với cuộc sống)</span>
+                <span>Bao phủ Khung Chương trình GDPT (Bộ sách Kết nối tri thức với cuộc sống — Lớp 2–3)</span>
               </h3>
 
-              <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
-                {[1, 2, 3, 4, 5].map((g) => {
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {[2, 3].map((g) => {
                   const count = overview?.curriculumCoverage?.[g as CurriculumGrade] || 0;
                   return (
                     <div
@@ -1110,11 +1112,13 @@ export const AdminDashboard: React.FC = () => {
                         setSelectedCurriculumGrade(g as CurriculumGrade);
                         setActiveTab('curriculum');
                       }}
-                      className="p-4 bg-slate-50 hover:bg-emerald-50/50 rounded-2xl border border-slate-200 cursor-pointer transition text-center"
+                      className="p-5 bg-slate-50 hover:bg-emerald-50/50 rounded-2xl border border-slate-200 cursor-pointer transition text-center"
                     >
                       <span className="text-xs font-bold text-slate-500 block">Khối Lớp {g}</span>
-                      <span className="text-2xl font-black text-slate-800 my-1 block">{count}</span>
-                      <span className="text-[11px] text-emerald-700 font-bold">Mục đã kiểm định</span>
+                      <span className="text-3xl font-black text-slate-800 my-1 block">{count}</span>
+                      <span className="text-xs text-emerald-700 font-bold">
+                        {count > 0 ? `${count} mục chuẩn GDPT 2018` : 'Chưa có dữ liệu kiểm định'}
+                      </span>
                     </div>
                   );
                 })}
@@ -2900,20 +2904,23 @@ export const AdminDashboard: React.FC = () => {
             <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
                 <h3 className="text-base font-black text-slate-900">
-                  Ngân hàng Khung Chương trình GDPT 2018 (Tiếng Việt 1–5)
+                  Ngân hàng Khung Chương trình GDPT 2018 (Tiếng Việt Lớp 2–3)
                 </h3>
                 <p className="text-xs text-slate-500 font-semibold mt-0.5">
-                  Bộ sách: <strong>Kết nối tri thức với cuộc sống</strong> — Chuẩn hóa Yêu cầu cần đạt (YCCĐ)
+                  Bộ sách: <strong>Kết nối tri thức với cuộc sống</strong> — Chuẩn hóa Yêu cầu cần đạt (YCCĐ) Lớp 2–3
                 </p>
               </div>
 
-              {/* Grade selector */}
+              {/* Grade selector: only 2 and 3 */}
               <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
-                {CURRICULUM_GRADES.map((g) => (
+                {[2, 3].map((g) => (
                   <button
                     key={g}
-                    onClick={() => setSelectedCurriculumGrade(g)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                    onClick={() => {
+                      setSelectedCurriculumGrade(g as CurriculumGrade);
+                      fetchCurriculum(g as CurriculumGrade);
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
                       selectedCurriculumGrade === g
                         ? 'bg-emerald-600 text-white shadow-sm'
                         : 'text-slate-600 hover:text-slate-900'
@@ -2925,9 +2932,11 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Curriculum Nodes List */}
+            {/* Curriculum Nodes List: filter strictly by selectedCurriculumGrade */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {curriculumNodes.map((node) => (
+              {curriculumNodes
+                .filter((node) => Number(node.grade) === Number(selectedCurriculumGrade))
+                .map((node) => (
                 <div
                   key={node.id}
                   className="p-5 bg-white rounded-3xl border border-slate-200 shadow-sm space-y-3 relative hover:border-emerald-300 transition"
@@ -2966,8 +2975,14 @@ export const AdminDashboard: React.FC = () => {
                   {/* Reference Source */}
                   <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400 font-medium">
                     <span className="truncate max-w-[280px]">Nguồn: {node.referenceSource}</span>
-                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded text-[10px]">
-                      Đã kiểm chứng
+                    <span className={`px-2 py-0.5 font-bold rounded text-[10px] ${
+                      (node as any).isVerified || (node as any).verificationStatus === 'verified'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {(node as any).isVerified || (node as any).verificationStatus === 'verified'
+                        ? 'Đã kiểm chứng'
+                        : 'Chưa có dữ liệu kiểm định'}
                     </span>
                   </div>
                 </div>

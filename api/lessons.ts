@@ -629,6 +629,7 @@ async function handleGenerateLessonDraft(req: VercelApiRequest, data: any) {
     );
   }
 
+  const activeModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
   const safeTopic = String(topic || 'Tình cảm gia đình').replace(/[\r\n\t]+/g, ' ').slice(0, 100);
   const targetGrade = Number(grade || 2);
   const wordCount = targetWordCount || (targetGrade === 2 ? 140 : 180);
@@ -660,7 +661,7 @@ Trả về duy nhất định dạng JSON thuần dạng:
 }`;
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -680,7 +681,12 @@ Trả về duy nhất định dạng JSON thuần dạng:
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new ApiError(502, 'internal', `Lỗi từ dịch vụ Gemini AI (${response.status}): ${errText.slice(0, 200)}`);
+    let errorDetail = `Lỗi từ dịch vụ Gemini AI (${response.status})`;
+    if (response.status === 400) errorDetail = 'Khóa API không hợp lệ hoặc tham số không đúng (API_KEY_INVALID)';
+    else if (response.status === 403) errorDetail = 'Khóa API bị hạn chế quyền hoặc chưa kích hoạt Generative Language API (PERMISSION_DENIED)';
+    else if (response.status === 404) errorDetail = `Mô hình ${activeModel} không tìm thấy hoặc đã đổi tên (MODEL_NOT_FOUND)`;
+    else if (response.status === 429) errorDetail = 'Hết hạn ngạch gọi API Google Gemini miễn phí (QUOTA_EXCEEDED)';
+    throw new ApiError(502, 'internal', `${errorDetail}: ${errText.slice(0, 150)}`);
   }
 
   const resData = await response.json();
@@ -699,36 +705,183 @@ Trả về duy nhất định dạng JSON thuần dạng:
   return {
     success: true,
     draft,
-    isAiGenerated: true
+    isAiGenerated: true,
+    model: activeModel
   };
 }
 
 // 9. AI STATUS
 async function handleGetAIStatus() {
-  const hasGemini = Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY);
-  return {
-    success: true,
-    connected: hasGemini,
-    provider: hasGemini ? 'Google Gemini AI' : 'Offline / Manual Mode',
-    supportedFeatures: {
-      lessonGeneration: hasGemini,
-      remediationSuggestion: hasGemini,
-      questionGeneration: hasGemini
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY;
+  const hasGemini = Boolean(apiKey);
+  const activeModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+
+  if (!hasGemini) {
+    return {
+      success: true,
+      connected: false,
+      status: 'NOT_CONFIGURED',
+      provider: 'Offline / Manual Mode',
+      model: activeModel,
+      activeModel,
+      supportedFeatures: {
+        lessonGeneration: false,
+        remediationSuggestion: false,
+        questionGeneration: false
+      }
+    };
+  }
+
+  // Quick verification ping to ensure valid key and model
+  try {
+    const startTime = Date.now();
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'Ping' }] }],
+          generationConfig: { maxOutputTokens: 2 }
+        })
+      }
+    );
+    const latency = Date.now() - startTime;
+
+    if (response.ok) {
+      return {
+        success: true,
+        connected: true,
+        status: 'VERIFIED',
+        activeModel,
+        model: activeModel,
+        lastLatencyMs: latency,
+        provider: 'Google Gemini AI',
+        supportedFeatures: {
+          lessonGeneration: true,
+          remediationSuggestion: true,
+          questionGeneration: true
+        }
+      };
+    } else {
+      const errText = await response.text();
+      let errorDesc = `HTTP ${response.status}`;
+      if (response.status === 400) errorDesc = 'Khóa API không hợp lệ (API_KEY_INVALID)';
+      else if (response.status === 403) errorDesc = 'Khóa API bị hạn chế quyền hoặc chưa bật API (PERMISSION_DENIED)';
+      else if (response.status === 404) errorDesc = `Mô hình ${activeModel} không tìm thấy (MODEL_NOT_FOUND)`;
+      else if (response.status === 429) errorDesc = 'Hết hạn ngạch hoặc bị giới hạn tốc độ (QUOTA_EXCEEDED)';
+
+      return {
+        success: true,
+        connected: true,
+        status: 'UNAVAILABLE',
+        activeModel,
+        model: activeModel,
+        lastErrorCode: errorDesc,
+        message: `Dịch vụ Google Gemini phản hồi lỗi (${response.status}): ${errText.slice(0, 150)}`,
+        provider: 'Google Gemini AI',
+        supportedFeatures: {
+          lessonGeneration: false,
+          remediationSuggestion: false,
+          questionGeneration: false
+        }
+      };
     }
-  };
+  } catch (err: any) {
+    return {
+      success: true,
+      connected: true,
+      status: 'READY_UNVERIFIED',
+      activeModel,
+      model: activeModel,
+      provider: 'Google Gemini AI',
+      message: `Đã nhận diện khóa API trong backend nhưng chưa kiểm chứng với cuộc gọi thật: ${err.message}`,
+      supportedFeatures: {
+        lessonGeneration: true,
+        remediationSuggestion: true,
+        questionGeneration: true
+      }
+    };
+  }
 }
 
 // 10. TEST AI CONNECTION
 async function handleTestAIConnection() {
-  const hasGemini = Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY);
-  if (!hasGemini) {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY;
+  const activeModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+
+  if (!apiKey) {
     return {
       success: false,
-      message: 'Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ. Hệ thống chuyển sang chế độ soạn bài thủ công an toàn.'
+      status: {
+        status: 'NOT_CONFIGURED',
+        activeModel,
+        model: activeModel,
+        lastErrorCode: 'MISSING_API_KEY',
+        message: 'Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ Vercel.'
+      },
+      error: 'Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ Vercel.'
     };
   }
-  return {
-    success: true,
-    message: 'Kết nối dịch vụ AI Google Gemini sẵn sàng.'
-  };
+
+  const startTime = Date.now();
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'Ping' }] }],
+          generationConfig: { maxOutputTokens: 2 }
+        })
+      }
+    );
+    const latency = Date.now() - startTime;
+
+    if (response.ok) {
+      return {
+        success: true,
+        status: {
+          status: 'VERIFIED',
+          activeModel,
+          model: activeModel,
+          lastLatencyMs: latency,
+          provider: 'Google Gemini AI'
+        },
+        message: `Kết nối dịch vụ AI Google Gemini sẵn sàng (Độ trễ: ${latency}ms, Model: ${activeModel}).`
+      };
+    } else {
+      const errText = await response.text();
+      let errorDesc = `HTTP ${response.status}`;
+      if (response.status === 400) errorDesc = 'Khóa API không hợp lệ (API_KEY_INVALID)';
+      else if (response.status === 403) errorDesc = 'Khóa API bị hạn chế quyền hoặc chưa bật API (PERMISSION_DENIED)';
+      else if (response.status === 404) errorDesc = `Mô hình ${activeModel} không tìm thấy (MODEL_NOT_FOUND)`;
+      else if (response.status === 429) errorDesc = 'Hết hạn ngạch hoặc bị giới hạn tốc độ (QUOTA_EXCEEDED)';
+
+      return {
+        success: false,
+        status: {
+          status: 'UNAVAILABLE',
+          activeModel,
+          model: activeModel,
+          lastErrorCode: errorDesc,
+          message: `Lỗi kết nối Gemini API (${response.status}): ${errText.slice(0, 150)}`
+        },
+        error: `Lỗi kết nối Gemini API (${response.status}): ${errText.slice(0, 150)}`
+      };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      status: {
+        status: 'UNAVAILABLE',
+        activeModel,
+        model: activeModel,
+        lastErrorCode: 'NETWORK_ERROR',
+        message: `Không thể kết nối tới Google Gemini: ${err.message}`
+      },
+      error: `Không thể kết nối tới Google Gemini: ${err.message}`
+    };
+  }
 }

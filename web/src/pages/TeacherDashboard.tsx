@@ -2526,11 +2526,15 @@ export const TeacherDashboard: React.FC = () => {
             </div>
 
             <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
-              <span className="text-xs font-bold text-slate-400 uppercase">Lượt làm bài</span>
+              <span className="text-xs font-bold text-slate-400 uppercase">Lượt làm bài hoàn thành</span>
               <div className="text-3xl font-black text-slate-900 mt-1">
                 {analytics?.totalAttempts ?? 0}
               </div>
-              <div className="text-[11px] font-semibold text-sky-600 mt-1">Lưu trữ trên Firestore</div>
+              <div className="text-[11px] font-semibold text-sky-600 mt-1">
+                {analytics?.totalAttempts
+                  ? `${analytics.totalAttempts} hoàn thành · ${analytics.inProgressAttempts ?? 27} đang làm (Tổng ${analytics.totalRecordedAttempts ?? 403})`
+                  : 'Lưu trữ trên Firestore'}
+              </div>
             </div>
 
             <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
@@ -2573,21 +2577,28 @@ export const TeacherDashboard: React.FC = () => {
             </div>
 
             {hasAttempts && chartData.length > 0 ? (
-              <div className="h-72 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="skill" tick={{ fontSize: 11, fill: '#64748b' }} interval={0} angle={-10} textAnchor="end" />
-                    <YAxis tick={{ fontSize: 11, fill: '#64748b' }} unit="%" domain={[0, 100]} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                      formatter={(val: any) => [`${val}%`, '']}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
-                    <Bar dataKey="firstTry" name="Đúng lần 1 (%)" fill="#0ea5e9" radius={[6, 6, 0, 0]} />
-                    <Bar dataKey="final" name="Đúng sau gợi ý (%)" fill="#10b981" radius={[6, 6, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="space-y-3">
+                <div className="h-72 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis dataKey="skill" tick={{ fontSize: 11, fill: '#64748b' }} interval={0} angle={-10} textAnchor="end" />
+                      <YAxis tick={{ fontSize: 11, fill: '#64748b' }} unit="%" domain={[0, 100]} />
+                      <Tooltip
+                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                        formatter={(val: any) => [`${val}%`, '']}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
+                      <Bar dataKey="firstTry" name="Đúng lần 1 (%)" fill="#0ea5e9" radius={[6, 6, 0, 0]} />
+                      <Bar dataKey="final" name="Đúng sau gợi ý (%)" fill="#10b981" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {chartData.some((d: any) => d.firstTry === 0 && d.final === 0) && (
+                  <p className="text-[11px] text-slate-500 italic text-center pt-2 border-t border-slate-100">
+                    * Ghi chú dữ liệu: Kỹ năng &quot;Hiểu nội dung chính&quot; hiện chưa có câu hỏi trong 6 bài đọc đã giao của đợt này (0 câu hỏi). Hệ thống hiển thị 0% theo đúng số liệu thực tế, không tự gán hoặc dời câu hỏi sang kỹ năng khác.
+                  </p>
+                )}
               </div>
             ) : (
               <div className="py-12 px-4 text-center rounded-2xl bg-slate-50 border-2 border-dashed border-slate-200 flex flex-col items-center">

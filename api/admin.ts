@@ -60,7 +60,7 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
         break;
 
       case 'getCurriculumFramework':
-        result = await handleGetCurriculumFramework(req);
+        result = await handleGetCurriculumFramework(req, data);
         break;
 
       case 'listAcademicYears':
@@ -103,14 +103,16 @@ async function handleGetAdminOverview(req: VercelApiRequest) {
     studentsSnap,
     lessonsSnap,
     assignmentsSnap,
-    attemptsSnap
+    attemptsSnap,
+    curriculumSnap
   ] = await Promise.all([
     db.collection('users').get(),
     db.collection('classes').get(),
     db.collection('students').get(),
     db.collection('lessons').get(),
     db.collection('assignments').get(),
-    db.collection('attempts').get()
+    db.collection('attempts').get(),
+    db.collection('curriculumNodes').get()
   ]);
 
   let totalTeachers = 0;
@@ -131,6 +133,23 @@ async function handleGetAdminOverview(req: VercelApiRequest) {
     }
   });
 
+  const curriculumCoverage: Record<number, number> = { 2: 0, 3: 0 };
+  curriculumSnap.forEach((d) => {
+    const c = d.data();
+    const g = Number(c.grade);
+    if (g === 2 || g === 3) {
+      curriculumCoverage[g] = (curriculumCoverage[g] || 0) + 1;
+    }
+  });
+
+  let completedAttempts = 0;
+  let inProgressAttempts = 0;
+  attemptsSnap.forEach((d) => {
+    const a = d.data();
+    if (a.status === 'completed') completedAttempts++;
+    else inProgressAttempts++;
+  });
+
   return {
     success: true,
     totalClasses: classesSnap.size,
@@ -138,10 +157,13 @@ async function handleGetAdminOverview(req: VercelApiRequest) {
     totalLessons: lessonsSnap.size,
     totalAssignments: assignmentsSnap.size,
     totalAttempts: attemptsSnap.size,
+    completedAttempts,
+    inProgressAttempts,
     totalTeachers,
     activeTeachers,
     pendingTeachers,
-    isolatedTestTeachers
+    isolatedTestTeachers,
+    curriculumCoverage
   };
 }
 
@@ -221,11 +243,17 @@ async function handleListAllClassesAdmin(req: VercelApiRequest) {
 }
 
 // 4. GET CURRICULUM FRAMEWORK
-async function handleGetCurriculumFramework(req: VercelApiRequest) {
+async function handleGetCurriculumFramework(req: VercelApiRequest, data: any) {
   await requireAdmin(req);
   const db = getDb();
+  const { grade } = data || {};
 
-  const snap = await db.collection('curriculumNodes').get();
+  let query: FirebaseFirestore.Query = db.collection('curriculumNodes');
+  if (grade && (Number(grade) === 2 || Number(grade) === 3)) {
+    query = query.where('grade', '==', Number(grade));
+  }
+
+  const snap = await query.get();
   const nodes = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
   return { success: true, nodes };
