@@ -10,9 +10,9 @@
  * 5. getAttemptReview
  */
 
-import { getDb } from './helpers/firebaseAdmin.js';
-import { handleApiError, requireStudentSession, verifyAuthToken } from './helpers/authMiddleware.js';
-import { ApiError, VercelApiRequest, VercelApiResponse } from './helpers/types.js';
+import { getDb } from './_helpers/firebaseAdmin.js';
+import { handleApiError, requireStudentSession, verifyAuthToken } from './_helpers/authMiddleware.js';
+import { ApiError, VercelApiRequest, VercelApiResponse } from './_helpers/types.js';
 
 function checkAnswerCorrectness(studentAns: any, correctAns: any): boolean {
   if (typeof correctAns === 'boolean') {

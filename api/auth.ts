@@ -16,7 +16,7 @@
  */
 
 import type * as admin from 'firebase-admin';
-import { getAuth, getDb, isLocalEmulator } from './helpers/firebaseAdmin.js';
+import { getAuth, getDb, isLocalEmulator } from './_helpers/firebaseAdmin.js';
 import {
   CURRENT_HASH_VERSION,
   OWASP_PBKDF2_ITERATIONS,
@@ -29,21 +29,21 @@ import {
   needsRehash,
   verifyAccessCode,
   verifyPassword
-} from './helpers/crypto.js';
+} from './_helpers/crypto.js';
 import {
   clearAuthSuccess,
   enforceAuthRateLimit,
   getClientIp,
   recordAuthFailure
-} from './helpers/rateLimiter.js';
+} from './_helpers/rateLimiter.js';
 import {
   handleApiError,
   requireAdmin,
   requireStudentSession,
   requireTeacherOrAdmin,
   verifyAuthToken
-} from './helpers/authMiddleware.js';
-import { ApiError, VercelApiRequest, VercelApiResponse } from './helpers/types.js';
+} from './_helpers/authMiddleware.js';
+import { ApiError, VercelApiRequest, VercelApiResponse } from './_helpers/types.js';
 
 export default async function handler(req: VercelApiRequest, res: VercelApiResponse) {
   // CORS & OPTIONS support

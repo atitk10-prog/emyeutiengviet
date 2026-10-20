@@ -12,9 +12,9 @@
  * 7. deleteRemediationActivity
  */
 
-import { getDb } from './helpers/firebaseAdmin.js';
-import { handleApiError, requireTeacher } from './helpers/authMiddleware.js';
-import { ApiError, VercelApiRequest, VercelApiResponse } from './helpers/types.js';
+import { getDb } from './_helpers/firebaseAdmin.js';
+import { handleApiError, requireTeacher } from './_helpers/authMiddleware.js';
+import { ApiError, VercelApiRequest, VercelApiResponse } from './_helpers/types.js';
 
 const SKILL_LABELS: Record<string, string> = {
   thong_tin_truc_tiep: 'Tìm thông tin trực tiếp',

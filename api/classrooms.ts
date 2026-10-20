@@ -10,14 +10,14 @@
  * 5. checkClassCode
  */
 
-import { getDb } from './helpers/firebaseAdmin.js';
-import { generateClassCode } from './helpers/crypto.js';
+import { getDb } from './_helpers/firebaseAdmin.js';
+import { generateClassCode } from './_helpers/crypto.js';
 import {
   handleApiError,
   requireTeacherOrAdmin,
   verifyAuthToken
-} from './helpers/authMiddleware.js';
-import { ApiError, VercelApiRequest, VercelApiResponse } from './helpers/types.js';
+} from './_helpers/authMiddleware.js';
+import { ApiError, VercelApiRequest, VercelApiResponse } from './_helpers/types.js';
 
 export default async function handler(req: VercelApiRequest, res: VercelApiResponse) {
   // CORS & OPTIONS support

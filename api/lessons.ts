@@ -15,9 +15,9 @@
  * 10. testAIConnection
  */
 
-import { getDb } from './helpers/firebaseAdmin.js';
-import { handleApiError, requireTeacher, requireTeacherOrAdmin } from './helpers/authMiddleware.js';
-import { ApiError, VercelApiRequest, VercelApiResponse } from './helpers/types.js';
+import { getDb } from './_helpers/firebaseAdmin.js';
+import { handleApiError, requireTeacher, requireTeacherOrAdmin } from './_helpers/authMiddleware.js';
+import { ApiError, VercelApiRequest, VercelApiResponse } from './_helpers/types.js';
 
 export default async function handler(req: VercelApiRequest, res: VercelApiResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
