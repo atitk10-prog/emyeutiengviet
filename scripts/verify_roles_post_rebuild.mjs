@@ -201,9 +201,10 @@ async function verifyAll() {
   const audioUrls = [
     '/audio/uploads/tts_lesson_g2_01_female_aoede_1792322929891.wav',
     '/audio/uploads/gemini_tts_g3_01_puck_1792322103570.wav',
-    '/audio/uploads/vietnamese_story_audio_g2_b01.wav',
-    '/audio/uploads/vietnamese_story_audio_g2_b02.wav',
-    '/audio/uploads/vietnamese_story_audio_g3_b01.wav'
+    '/audio/correct.wav',
+    '/audio/incorrect.wav',
+    '/audio/samples/audio_sample_1_piper_vais.wav',
+    '/audio/samples/audio_sample_2_vieneu_neural.wav'
   ];
   for (const aUrl of audioUrls) {
     const fullAudioUrl = `${BASE_URL}${aUrl}`;
