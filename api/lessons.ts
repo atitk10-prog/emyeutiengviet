@@ -560,7 +560,7 @@ async function handleAssignLesson(req: VercelApiRequest, data: any) {
     const assignmentData = {
       id: assignRef.id,
       classId: cId,
-      academicYear: cData.academicYear || '2025-2026',
+      academicYear: cData.academicYear || '2026-2027',
       semester: Number(vData.semester || 1),
       week: Number(vData.week || 1),
       lessonId,

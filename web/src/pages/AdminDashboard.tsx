@@ -145,7 +145,7 @@ export const AdminDashboard: React.FC = () => {
             id: ay,
             code: ay,
             name: `Năm học ${ay}`,
-            isCurrent: ay === (res.data?.currentAcademicYear || '2025-2026'),
+            isCurrent: ay === (res.data?.currentAcademicYear || '2026-2027'),
             periodType: ay === '2026-2027' ? 'current' : ay > '2026-2027' ? 'future' : 'past',
             status: 'active',
             totalClasses: 0,
@@ -156,7 +156,7 @@ export const AdminDashboard: React.FC = () => {
             updatedAt: Date.now()
           };
         }
-        const code = ay.code || ay.id || '2025-2026';
+        const code = ay.code || ay.id || '2026-2027';
         return {
           id: ay.id || code,
           code,
@@ -2122,9 +2122,9 @@ export const AdminDashboard: React.FC = () => {
                   });
 
                   classes.forEach((c) => {
-                    const yr = c.academicYear || '2025-2026';
+                    const yr = c.academicYear || '2026-2027';
                     if (!yearsMap.has(yr)) {
-                      const isCur = yr === '2025-2026';
+                      const isCur = yr === '2026-2027';
                       const isFut = yr > '2026-2027';
                       yearsMap.set(yr, {
                         code: yr,
@@ -2155,7 +2155,7 @@ export const AdminDashboard: React.FC = () => {
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
                       {displayYears.map((item) => {
                         const yearClasses = classes.filter(
-                          (c) => (c.academicYear || '2025-2026') === item.code
+                          (c) => (c.academicYear || '2026-2027') === item.code
                         );
                         const totalStudents = item.totalStudents > 0
                           ? item.totalStudents
@@ -2365,7 +2365,7 @@ export const AdminDashboard: React.FC = () => {
                 {/* Grade Cards Grid */}
                 {(() => {
                   const yearClasses = classes.filter(
-                    (c) => (c.academicYear || '2025-2026') === adminNavYear
+                    (c) => (c.academicYear || '2026-2027') === adminNavYear
                   );
                   const availableGrades = Array.from(
                     new Set(yearClasses.map((c) => c.grade))
@@ -2489,7 +2489,7 @@ export const AdminDashboard: React.FC = () => {
                 {/* Search & Filter Toolbar within this Grade */}
                 {(() => {
                   const gradeClasses = classes.filter(
-                    (c) => (c.academicYear || '2025-2026') === adminNavYear && c.grade === adminNavGrade
+                    (c) => (c.academicYear || '2026-2027') === adminNavYear && c.grade === adminNavGrade
                   );
 
                   const filteredGradeClasses = gradeClasses.filter((cls) => {
@@ -2706,7 +2706,7 @@ export const AdminDashboard: React.FC = () => {
                           Khối {selectedAdminClass.grade}
                         </span>
                         <span className="px-3 py-1 bg-white/10 text-white text-xs font-bold rounded-full">
-                          Năm học {selectedAdminClass.academicYear || '2025-2026'}
+                          Năm học {selectedAdminClass.academicYear || '2026-2027'}
                         </span>
                         {selectedAdminClass.status === 'archived' ? (
                           <span className="px-3 py-1 bg-amber-400 text-amber-950 text-xs font-black rounded-full">
@@ -3080,11 +3080,9 @@ export const AdminDashboard: React.FC = () => {
                 <div className="flex gap-1.5 flex-wrap">
                   {Array.from(new Set([
                     ...academicYears.map((ay) => (typeof ay === 'string' ? ay : ay?.code || '')).filter(Boolean),
-                    ...classes.map((c) => c.academicYear || '2025-2026').filter(Boolean),
+                    ...classes.map((c) => c.academicYear || '2026-2027').filter(Boolean),
                     ...(overview?.academicYearsList || []).filter(Boolean),
-                    '2027-2028',
-                    '2026-2027',
-                    '2025-2026'
+                    '2026-2027'
                   ])).filter((yr): yr is string => typeof yr === 'string' && yr.length > 0)
                     .sort((a, b) => (b || '').localeCompare(a || ''))
                     .map((yr) => (
@@ -3220,11 +3218,9 @@ export const AdminDashboard: React.FC = () => {
                 <div className="flex gap-1.5 flex-wrap">
                   {Array.from(new Set([
                     ...academicYears.map((ay) => (typeof ay === 'string' ? ay : ay?.code || '')).filter(Boolean),
-                    ...classes.map((c) => c.academicYear || '2025-2026').filter(Boolean),
+                    ...classes.map((c) => c.academicYear || '2026-2027').filter(Boolean),
                     ...(overview?.academicYearsList || []).filter(Boolean),
-                    '2027-2028',
-                    '2026-2027',
-                    '2025-2026'
+                    '2026-2027'
                   ])).filter((yr): yr is string => typeof yr === 'string' && yr.length > 0)
                     .sort((a, b) => (b || '').localeCompare(a || ''))
                     .map((yr) => (

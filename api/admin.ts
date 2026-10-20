@@ -208,7 +208,7 @@ async function handleListAllClassesAdmin(req: VercelApiRequest) {
       name: d.name,
       grade: d.grade,
       classCode: d.classCode,
-      academicYear: d.academicYear || '2025-2026',
+      academicYear: d.academicYear || '2026-2027',
       studentCount: studentCountMap[doc.id] || 0,
       teacherUid: d.teacherUid,
       teacherName: teacherMap[d.teacherUid] || 'Chưa phân công',
@@ -250,13 +250,12 @@ async function handleListAcademicYears(req: VercelApiRequest) {
   const allYearsSet = new Set<string>(configuredYears.keys());
   const classToYear = new Map<string, string>();
   classesSnap.forEach((d) => {
-    const yr = d.data().academicYear || '2025-2026';
+    const yr = d.data().academicYear || '2026-2027';
     allYearsSet.add(yr);
     classToYear.set(d.id, yr);
   });
 
-  // Ensure default standard years exist
-  allYearsSet.add('2025-2026');
+  // Ensure operational year 2026-2027 exists
   allYearsSet.add('2026-2027');
 
   const yearStudentsMap = new Map<string, Set<string>>();
@@ -268,7 +267,7 @@ async function handleListAcademicYears(req: VercelApiRequest) {
     }
   });
 
-  let currentYearCode = '2025-2026';
+  let currentYearCode = '2026-2027';
   for (const [code, data] of configuredYears.entries()) {
     if (data.isCurrent) {
       currentYearCode = code;
@@ -278,7 +277,7 @@ async function handleListAcademicYears(req: VercelApiRequest) {
 
   const parseStartYear = (code: string): number => {
     const match = String(code).match(/^(\d{4})/);
-    return match ? parseInt(match[1], 10) : 2025;
+    return match ? parseInt(match[1], 10) : 2026;
   };
   const currentStartYear = parseStartYear(currentYearCode);
 
@@ -302,7 +301,7 @@ async function handleListAcademicYears(req: VercelApiRequest) {
       let activeClasses = 0;
       classesSnap.forEach((d) => {
         const c = d.data();
-        if ((c.academicYear || '2025-2026') === code) {
+        if ((c.academicYear || '2026-2027') === code) {
           totalClasses++;
           if (c.status !== 'archived') activeClasses++;
         }

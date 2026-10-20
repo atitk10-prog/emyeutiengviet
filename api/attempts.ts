@@ -107,7 +107,7 @@ async function handleGetStudentLibrary(req: VercelApiRequest) {
   let studentCode = '';
   let className = '';
   let grade = 2;
-  let academicYear = '2025-2026';
+  let academicYear = '2026-2027';
 
   if (session.studentId) {
     const sDoc = await db.collection('students').doc(session.studentId).get();
@@ -311,7 +311,7 @@ async function handleStartAttempt(req: VercelApiRequest, data: any) {
     id: attemptId,
     studentId: session.studentId,
     classId: assignData.classId || session.classId,
-    academicYear: assignData.academicYear || '2025-2026',
+    academicYear: assignData.academicYear || '2026-2027',
     semester: Number(assignData.semester || 1),
     assignmentId,
     lessonId: assignData.lessonId,

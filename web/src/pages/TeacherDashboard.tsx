@@ -139,7 +139,7 @@ export const TeacherDashboard: React.FC = () => {
 
   // Class Management & Filtering States (Gói A)
   const [classGradeFilter, setClassGradeFilter] = useState<'all' | 2 | 3>('all');
-  const [classYearFilter, setClassYearFilter] = useState<'all' | '2026-2027' | '2025-2026'>('2026-2027');
+  const [classYearFilter, setClassYearFilter] = useState<'all' | '2026-2027'>('2026-2027');
   const [classStatusFilter, setClassStatusFilter] = useState<'all' | 'active' | 'archived'>('active');
   const [editingClass, setEditingClass] = useState<Classroom | null>(null);
   const [editClassName, setEditClassName] = useState('');
@@ -341,12 +341,12 @@ export const TeacherDashboard: React.FC = () => {
   ]);
 
   // Data Export & Audit Reports (Module 5: NĂM HỌC → KHỐI → LỚP → HỌC KỲ → XEM BÁO CÁO)
-  const [exportNavYear, setExportNavYear] = useState<string | null>(null);
+  const [exportNavYear, setExportNavYear] = useState<string | null>('2026-2027');
   const [exportNavGrade, setExportNavGrade] = useState<number | null>(null);
   const [exportNavClassId, setExportNavClassId] = useState<string | null>(null);
   const [exportNavSemester, setExportNavSemester] = useState<1 | 2 | 'all' | null>('all');
   const [hasGeneratedReport, setHasGeneratedReport] = useState(false);
-  const [exportYearFilter, setExportYearFilter] = useState<'all' | '2026-2027' | '2025-2026'>('2026-2027');
+  const [exportYearFilter, setExportYearFilter] = useState<'all' | '2026-2027'>('2026-2027');
   const [exportGradeFilter, setExportGradeFilter] = useState<'all' | 2 | 3>('all');
   const [exportClassId, setExportClassId] = useState<string>('');
   const [exportRecords, setExportRecords] = useState<any[]>([]);
@@ -2815,7 +2815,7 @@ export const TeacherDashboard: React.FC = () => {
                 const availableYears = Array.from(
                   new Set(classes.map((c) => c.academicYear || '2026-2027'))
                 ).sort().reverse();
-                const displayYears = availableYears.length > 0 ? availableYears : ['2026-2027', '2025-2026'];
+                const displayYears = availableYears.length > 0 ? availableYears.filter((y) => y === '2026-2027') : ['2026-2027'];
 
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
@@ -4040,7 +4040,7 @@ export const TeacherDashboard: React.FC = () => {
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">Năm học</label>
                     <div className="flex gap-2">
-                      {['2026-2027', '2025-2026'].map((yr) => (
+                      {['2026-2027'].map((yr) => (
                         <button
                           key={yr}
                           type="button"
@@ -4152,7 +4152,7 @@ export const TeacherDashboard: React.FC = () => {
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">Năm học</label>
                     <div className="flex gap-2">
-                      {['2026-2027', '2025-2026'].map((yr) => (
+                      {['2026-2027'].map((yr) => (
                         <button
                           key={yr}
                           type="button"
@@ -6884,14 +6884,6 @@ export const TeacherDashboard: React.FC = () => {
                                 className="w-full px-3 py-1.5 bg-white rounded-lg border border-indigo-300 text-indigo-950 font-bold text-xs focus:ring-2 focus:ring-indigo-400 focus:outline-none cursor-pointer"
                               >
                                 <option value="2026-2027">Năm học 2026–2027</option>
-                                <option value="2025-2026">Năm học 2025–2026</option>
-                                {Array.from(new Set(classes.map((c) => c.academicYear).filter(Boolean)))
-                                  .filter((y) => y !== '2026-2027' && y !== '2025-2026')
-                                  .map((y) => (
-                                    <option key={y} value={y}>
-                                      Năm học {y}
-                                    </option>
-                                  ))}
                               </select>
                             </div>
                           )}
@@ -7355,7 +7347,7 @@ export const TeacherDashboard: React.FC = () => {
         const remedAvailableYears = Array.from(
           new Set(classes.map((c) => c.academicYear || '2026-2027'))
         ).sort().reverse();
-        const displayRemedYears = remedAvailableYears.length > 0 ? remedAvailableYears : ['2026-2027', '2025-2026'];
+        const displayRemedYears = remedAvailableYears.length > 0 ? remedAvailableYears.filter((y) => y === '2026-2027') : ['2026-2027'];
 
         const remedAvailableGrades = remedNavYear
           ? Array.from(
