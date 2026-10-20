@@ -24,7 +24,7 @@ backups/
 
 # Storage & Audio Data (Local/Private uploads)
 persistent_storage/
-web/public/audio/uploads/
+# web/public/audio/uploads/ is tracked for static audio deployment on Vercel
 
 # Environment, Secrets & Credentials
 .env
