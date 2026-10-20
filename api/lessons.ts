@@ -785,9 +785,8 @@ Trả về duy nhất định dạng JSON thuần dạng:
 // 9. AI STATUS
 async function handleGetAIStatus() {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY;
-  const hasGemini = Boolean(apiKey);
 
-  if (!hasGemini) {
+  if (!apiKey) {
     return {
       success: true,
       connected: false,
