@@ -203,10 +203,6 @@ async function handleGetLessonDetail(req: VercelApiRequest, data: any) {
     const vDoc = await db.collection('lessons').doc(lessonId).collection('versions').doc(targetVersionId).get();
     if (vDoc.exists) {
       versionData = vDoc.data();
-      if (versionData && !versionData.audioUrl && lessonData.audioUrl) {
-        versionData.audioUrl = lessonData.audioUrl;
-        versionData.audioMetadata = versionData.audioMetadata || lessonData.audioMetadata;
-      }
     }
     if (isOwner) {
       const keyDoc = await db.collection('privateAnswerKeys').doc(targetVersionId).get();
@@ -215,6 +211,46 @@ async function handleGetLessonDetail(req: VercelApiRequest, data: any) {
       }
     }
   }
+
+  // Fetch all immutable versions of this lesson (Phase 2 & Module 2.1)
+  const versionsSnap = await db.collection('lessons').doc(lessonId).collection('versions').get();
+  const versionsList = versionsSnap.docs.map((vd) => {
+    const v = vd.data();
+    return {
+      versionId: vd.id,
+      id: vd.id,
+      versionNumber: v.versionNumber || (vd.id.includes('v1') ? 1 : 2),
+      title: v.title || lessonData.title,
+      passage: v.passage || '',
+      grade: v.grade || lessonData.grade,
+      topic: v.topic || lessonData.topic,
+      totalQuestions: v.publicQuestions?.length || v.totalQuestions || 5,
+      hasAudio: Boolean(v.audioUrl),
+      audioUrl: v.audioUrl || null,
+      audioMetadata: v.audioMetadata || null,
+      publishedAt: v.publishedAt || v.createdAt || null,
+      createdAt: v.createdAt || null
+    };
+  }).sort((a, b) => a.versionNumber - b.versionNumber);
+
+  // Fetch all assignments using this lesson
+  const assignmentsSnap = await db.collection('assignments').where('lessonId', '==', lessonId).get();
+  const assignmentsList = assignmentsSnap.docs.map((ad) => {
+    const a = ad.data();
+    return {
+      id: ad.id,
+      assignmentId: ad.id,
+      classId: a.classId,
+      lessonId: a.lessonId,
+      lessonVersionId: a.lessonVersionId,
+      lessonVersionNumber: a.lessonVersionNumber || (a.lessonVersionId?.includes('v1') ? 1 : 2),
+      roundName: a.roundName || 'Đợt 1',
+      title: a.title,
+      academicYear: a.academicYear || '2026-2027',
+      status: a.status || 'active',
+      createdAt: a.createdAt || null
+    };
+  });
 
   let privateAnswersList: any[] = [];
   let privateAnswersMap: Record<string, any> = {};
@@ -249,6 +285,8 @@ async function handleGetLessonDetail(req: VercelApiRequest, data: any) {
     success: true,
     lesson: lessonData,
     version: versionData,
+    versionsList,
+    assignmentsList,
     privateAnswers: isOwner ? privateAnswersMap : null,
     privateAnswersList: isOwner ? privateAnswersList : []
   };

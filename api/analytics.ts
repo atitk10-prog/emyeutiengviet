@@ -854,6 +854,136 @@ async function handleSuggestRemediation(req: VercelApiRequest, data: any) {
     detailBadge: `${completionRate}% hoàn thành`
   };
 
+  // 5. Calculate 5 competencies from attempts responses
+  const targetAttemptsForSkills = (activeScope === 'tung_hoc_sinh' && targetStudentId)
+    ? completedAttempts.filter((a) => a.studentId === targetStudentId)
+    : completedAttempts;
+
+  const versionSkillCache: Record<string, Record<string, string>> = {};
+  const neededVersionIds = Array.from(new Set(targetAttemptsForSkills.map((a) => a.lessonVersionId).filter(Boolean)));
+  await Promise.all(
+    neededVersionIds.map(async (vId) => {
+      const sampleAtt = targetAttemptsForSkills.find((a) => a.lessonVersionId === vId);
+      if (!sampleAtt) return;
+      const vDoc = await db.collection('lessons').doc(sampleAtt.lessonId).collection('versions').doc(vId).get();
+      const vData = vDoc.data();
+      const map: Record<string, string> = {};
+      if (vData && vData.publicQuestions) {
+        vData.publicQuestions.forEach((q: any) => {
+          map[q.id] = q.skillTag || 'thong_tin_truc_tiep';
+        });
+      }
+      versionSkillCache[vId] = map;
+    })
+  );
+
+  const skillAcc: Record<
+    string,
+    { tested: number; firstTryCorrect: number; finalCorrect: number; byStudent: Record<string, { tested: number; firstTryCorrect: number }> }
+  > = {
+    thong_tin_truc_tiep: { tested: 0, firstTryCorrect: 0, finalCorrect: 0, byStudent: {} },
+    tu_trong_ngu_canh: { tested: 0, firstTryCorrect: 0, finalCorrect: 0, byStudent: {} },
+    noi_dung_chinh: { tested: 0, firstTryCorrect: 0, finalCorrect: 0, byStudent: {} },
+    sap_xep_trinh_tu: { tested: 0, firstTryCorrect: 0, finalCorrect: 0, byStudent: {} },
+    lien_he_van_dung: { tested: 0, firstTryCorrect: 0, finalCorrect: 0, byStudent: {} }
+  };
+
+  const questionErrorAcc: Record<string, { questionId: string; prompt: string; skillTag: string; totalAnswered: number; firstTryIncorrect: number }> = {};
+
+  await Promise.all(
+    targetAttemptsForSkills.map(async (att) => {
+      const sId = att.studentId;
+      const qMap = versionSkillCache[att.lessonVersionId] || {};
+      const respSnap = await db.collection('attempts').doc(att.id).collection('responses').get();
+      respSnap.forEach((rDoc) => {
+        const r = rDoc.data();
+        const skill = qMap[r.questionId] || r.skillTag;
+        if (skill && skillAcc[skill]) {
+          skillAcc[skill].tested++;
+          if (r.firstTryCorrect) skillAcc[skill].firstTryCorrect++;
+          if (r.finalCorrect) skillAcc[skill].finalCorrect++;
+          if (!skillAcc[skill].byStudent[sId]) {
+            skillAcc[skill].byStudent[sId] = { tested: 0, firstTryCorrect: 0 };
+          }
+          skillAcc[skill].byStudent[sId].tested++;
+          if (r.firstTryCorrect) skillAcc[skill].byStudent[sId].firstTryCorrect++;
+        }
+
+        const qId = r.questionId || rDoc.id;
+        if (!questionErrorAcc[qId]) {
+          questionErrorAcc[qId] = {
+            questionId: qId,
+            prompt: r.prompt || `Câu hỏi ${qId}`,
+            skillTag: skill || 'thong_tin_truc_tiep',
+            totalAnswered: 0,
+            firstTryIncorrect: 0
+          };
+        }
+        questionErrorAcc[qId].totalAnswered++;
+        if (!r.firstTryCorrect) questionErrorAcc[qId].firstTryIncorrect++;
+      });
+    })
+  );
+
+  const skills: any[] = [];
+  const goodSkills: any[] = [];
+  const weakSkills: any[] = [];
+  const untestedSkills: any[] = [];
+
+  for (const [tag, label] of Object.entries(SKILL_LABELS)) {
+    const data = skillAcc[tag];
+    if (data.tested === 0) {
+      const sObj = {
+        skillTag: tag,
+        label,
+        testedCount: 0,
+        firstTryAccuracy: null,
+        finalAccuracy: null,
+        progressPercentagePoints: 0,
+        studentsNeedingHelp: 0,
+        status: 'no_data' as const
+      };
+      skills.push(sObj);
+      untestedSkills.push(sObj);
+    } else {
+      const firstAcc = Math.round((data.firstTryCorrect / data.tested) * 100);
+      const finalAcc = Math.round((data.finalCorrect / data.tested) * 100);
+      let needingHelp = 0;
+      for (const stStat of Object.values(data.byStudent)) {
+        if (stStat.tested > 0 && Math.round((stStat.firstTryCorrect / stStat.tested) * 100) < 70) {
+          needingHelp++;
+        }
+      }
+      const status = firstAcc >= 70 ? ('good' as const) : ('needs_remediation' as const);
+      const sObj = {
+        skillTag: tag,
+        label,
+        testedCount: data.tested,
+        firstTryAccuracy: firstAcc,
+        finalAccuracy: finalAcc,
+        progressPercentagePoints: Math.max(0, finalAcc - firstAcc),
+        studentsNeedingHelp: needingHelp,
+        status
+      };
+      skills.push(sObj);
+      if (status === 'good') goodSkills.push(sObj);
+      else weakSkills.push(sObj);
+    }
+  }
+
+  const highErrorQuestions = Object.values(questionErrorAcc)
+    .filter((q) => q.totalAnswered >= 3 && Math.round((q.firstTryIncorrect / q.totalAnswered) * 100) >= 30)
+    .map((q) => ({
+      questionId: q.questionId,
+      prompt: q.prompt,
+      skillTag: q.skillTag,
+      errorRate: Math.round((q.firstTryIncorrect / q.totalAnswered) * 100),
+      incorrectCount: q.firstTryIncorrect,
+      totalCount: q.totalAnswered
+    }))
+    .sort((a, b) => b.errorRate - a.errorRate)
+    .slice(0, 5);
+
   const statistics = {
     classId: targetCId,
     className,
@@ -869,11 +999,11 @@ async function handleSuggestRemediation(req: VercelApiRequest, data: any) {
     avgFirstTryAccuracy: activeScope === 'tung_hoc_sinh' ? (studentProfile?.firstTryAvg || 0) : avgFirstTry,
     avgFinalAccuracy: activeScope === 'tung_hoc_sinh' ? (studentProfile?.finalAvg || 0) : avgFinal,
     avgProgressPoints: activeScope === 'tung_hoc_sinh' ? (studentProfile?.progressDelta || 0) : avgProgress,
-    skills: [],
-    goodSkills: [],
-    weakSkills: [],
-    untestedSkills: [],
-    highErrorQuestions: [],
+    skills,
+    goodSkills,
+    weakSkills,
+    untestedSkills,
+    highErrorQuestions,
     updatedAt: Date.now()
   };
 

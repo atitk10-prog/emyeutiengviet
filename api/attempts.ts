@@ -190,7 +190,7 @@ async function handleGetStudentLibrary(req: VercelApiRequest) {
       if (vDoc.exists) {
         const vData = vDoc.data()!;
         realLessonTitle = vData.title || realLessonTitle;
-        if (vData.audioUrl) realAudioUrl = vData.audioUrl;
+        realAudioUrl = vData.audioUrl || undefined;
       }
     }
 

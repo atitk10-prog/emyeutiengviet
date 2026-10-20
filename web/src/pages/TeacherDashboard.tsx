@@ -1347,8 +1347,8 @@ export const TeacherDashboard: React.FC = () => {
             passage: version.passage || '',
             vocabulary: version.vocabulary || [],
             questions: fullQuestions,
-            audioUrl: version.audioUrl || lesson.audioUrl || undefined,
-            audioMetadata: version.audioMetadata || lesson.audioMetadata || undefined
+            audioUrl: version.audioUrl || undefined,
+            audioMetadata: version.audioMetadata || undefined
           });
         }
 
@@ -1821,11 +1821,11 @@ export const TeacherDashboard: React.FC = () => {
   };
 
   // Open Student Preview Modal (P0 - Read-Only Simulation)
-  const handleOpenStudentPreview = async (lesson: Lesson) => {
+  const handleOpenStudentPreview = async (lesson: Lesson, versionId?: string) => {
     setLoading(true);
     try {
       const getDetail = httpsCallable(functions, 'getLessonDetail');
-      const res: any = await getDetail({ lessonId: lesson.id });
+      const res: any = await getDetail({ lessonId: lesson.id, versionId });
       if (res.data?.success) {
         const { version, lesson: lData, privateAnswers } = res.data;
         const questions = (version?.publicQuestions || []).map((q: any) => {
@@ -1843,7 +1843,7 @@ export const TeacherDashboard: React.FC = () => {
           passage: version?.passage || '',
           grade: version?.grade || lData.grade,
           topic: version?.topic || lData.topic,
-          audioUrl: version?.audioUrl || lData.audioUrl || undefined,
+          audioUrl: version?.audioUrl || undefined,
           vocabulary: version?.vocabulary || [],
           questions
         });
@@ -6252,7 +6252,7 @@ export const TeacherDashboard: React.FC = () => {
                       ) : (
                         <div className="space-y-3">
                           {viewingLessonInfo.versions.map((ver: any) => (
-                            <div key={ver.versionId} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between">
+                            <div key={ver.versionId} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between gap-3">
                               <div>
                                 <div className="flex items-center gap-2">
                                   <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-xs font-black rounded-full border border-emerald-300">
@@ -6262,13 +6262,29 @@ export const TeacherDashboard: React.FC = () => {
                                     {ver.title}
                                   </span>
                                 </div>
-                                <div className="text-[11px] text-slate-500 mt-1">
-                                  Xuất bản lúc: {ver.publishedAt ? new Date(ver.publishedAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : 'Gốc'} · {ver.totalQuestions} câu hỏi
+                                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                                  <span className="text-[11px] text-slate-500">
+                                    Xuất bản lúc: {ver.publishedAt ? new Date(ver.publishedAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : 'Gốc'} · {ver.totalQuestions} câu hỏi
+                                  </span>
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ver.hasAudio ? 'bg-sky-100 text-sky-800 border border-sky-200' : 'bg-slate-200 text-slate-700'}`}>
+                                    {ver.hasAudio ? '🎙️ Có file âm thanh TTS' : '🔊 Web Speech API'}
+                                  </span>
                                 </div>
                               </div>
-                              <span className="text-xs font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200">
-                                Đã lưu bất biến
-                              </span>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenStudentPreview(viewingLessonInfo.lesson, ver.versionId)}
+                                  className="px-3 py-1.5 text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-xl border border-sky-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+                                  title="Xem trước nội dung và âm thanh của phiên bản này"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>Xem thử v{ver.versionNumber}</span>
+                                </button>
+                                <span className="text-xs font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200">
+                                  Đã lưu bất biến
+                                </span>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -8471,8 +8487,10 @@ export const TeacherDashboard: React.FC = () => {
                           <span className="text-amber-700 font-bold">
                             {stats.weakSkills.map((s) => `${s.label} (${s.studentsNeedingHelp} HS)`).join(', ')}
                           </span>
-                        ) : (
+                        ) : stats.goodSkills && stats.goodSkills.length > 0 ? (
                           <span className="text-emerald-700 font-bold">Lớp đạt chuẩn toàn bộ! 🎉</span>
+                        ) : (
+                          <span className="text-slate-500 font-medium">Chưa đủ dữ liệu để kết luận</span>
                         )}
                       </div>
                     </div>
@@ -8527,7 +8545,12 @@ export const TeacherDashboard: React.FC = () => {
                                 />
                                 <YAxis domain={[0, 100]} stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={(v) => `${v}%`} />
                                 <Tooltip
-                                  formatter={(value: any, name: string) => [`${value}%`, name]}
+                                  formatter={(value: any, name: string, item: any) => {
+                                    if (item?.payload?.hasData === false) {
+                                      return ['Chưa đủ dữ liệu (0 câu)', name];
+                                    }
+                                    return [`${value}%`, name];
+                                  }}
                                   contentStyle={{
                                     backgroundColor: '#ffffff',
                                     borderRadius: '16px',
