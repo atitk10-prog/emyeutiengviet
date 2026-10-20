@@ -689,7 +689,7 @@ Trả về duy nhất định dạng JSON thuần dạng:
     throw new ApiError(502, 'internal', `${errorDetail}: ${errText.slice(0, 150)}`);
   }
 
-  const resData = await response.json();
+  const resData: any = await response.json();
   const rawText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!rawText) {
     throw new ApiError(500, 'internal', 'Gemini AI không trả về nội dung bài đọc.');

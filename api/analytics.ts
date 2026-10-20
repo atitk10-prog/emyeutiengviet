@@ -744,7 +744,7 @@ async function handleSuggestRemediation(req: VercelApiRequest, data: any) {
     .where('status', '==', 'completed')
     .get();
 
-  const completedAttempts = attemptsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const completedAttempts: any[] = attemptsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
   // 4. Calculate participation and accuracy metrics
   const participatedStudentCodes = new Set(
@@ -1028,7 +1028,7 @@ BẮT BUỘC trả về định dạng JSON thuần dạng:
       );
 
       if (aiResponse.ok) {
-        const aiData = await aiResponse.json();
+        const aiData: any = await aiResponse.json();
         const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
         if (rawText) {
           const parsed = JSON.parse(rawText);
