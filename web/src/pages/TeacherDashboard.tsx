@@ -391,7 +391,7 @@ export const TeacherDashboard: React.FC = () => {
         const cRes: any = await getClassesFn({});
         if (cRes.data?.classes) {
           const classList: Classroom[] = cRes.data.classes;
-          classList.sort((a, b) => a.grade - b.grade || a.name.localeCompare(b.name));
+          classList.sort((a, b) => a.grade - b.grade || (a.name || '').localeCompare(b.name || ''));
           setClasses(classList);
           if (classList.length > 0 && selectedClass) {
             const fresh = classList.find((c) => c.id === selectedClass.id);
@@ -416,7 +416,7 @@ export const TeacherDashboard: React.FC = () => {
             const snapClasses = await getDocs(qClasses);
             const classList: Classroom[] = [];
             snapClasses.forEach((d) => classList.push(d.data() as Classroom));
-            classList.sort((a, b) => a.grade - b.grade || a.name.localeCompare(b.name));
+            classList.sort((a, b) => a.grade - b.grade || (a.name || '').localeCompare(b.name || ''));
             setClasses(classList);
             if (classList.length > 0 && selectedClass) {
               const fresh = classList.find((c) => c.id === selectedClass.id);

@@ -138,7 +138,44 @@ export const AdminDashboard: React.FC = () => {
       setLoadingAcademicYears(true);
       const listAyFn = httpsCallable(functions, 'listAcademicYears');
       const res: any = await listAyFn();
-      setAcademicYears(res.data.academicYears || []);
+      const rawList = res.data?.academicYears || [];
+      const normalized: AcademicYearItem[] = rawList.map((ay: any) => {
+        if (typeof ay === 'string') {
+          return {
+            id: ay,
+            code: ay,
+            name: `Năm học ${ay}`,
+            isCurrent: ay === (res.data?.currentAcademicYear || '2025-2026'),
+            periodType: ay === '2026-2027' ? 'current' : ay > '2026-2027' ? 'future' : 'past',
+            status: 'active',
+            totalClasses: 0,
+            activeClasses: 0,
+            totalStudents: 0,
+            canDelete: false,
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          };
+        }
+        const code = ay.code || ay.id || '2025-2026';
+        return {
+          id: ay.id || code,
+          code,
+          name: ay.name || `Năm học ${code}`,
+          isCurrent: Boolean(ay.isCurrent),
+          periodType: ay.periodType || 'past',
+          status: ay.status || 'active',
+          description: ay.description || '',
+          startDate: ay.startDate || '',
+          endDate: ay.endDate || '',
+          totalClasses: typeof ay.totalClasses === 'number' ? ay.totalClasses : 0,
+          activeClasses: typeof ay.activeClasses === 'number' ? ay.activeClasses : 0,
+          totalStudents: typeof ay.totalStudents === 'number' ? ay.totalStudents : 0,
+          canDelete: Boolean(ay.canDelete),
+          createdAt: ay.createdAt || Date.now(),
+          updatedAt: ay.updatedAt || Date.now()
+        };
+      });
+      setAcademicYears(normalized);
     } catch (err: any) {
       console.error('Error fetching academic years:', err);
     } finally {
@@ -185,7 +222,7 @@ export const AdminDashboard: React.FC = () => {
 
   // Search, Filter & Pagination States (Phase 3)
   const [teacherSearchQuery, setTeacherSearchQuery] = useState('');
-  const [teacherStatusFilter, setTeacherStatusFilter] = useState<'all' | 'active' | 'pending_approval' | 'suspended' | 'archived'>('all');
+  const [teacherStatusFilter, setTeacherStatusFilter] = useState<'all' | 'active' | 'pending_approval' | 'suspended' | 'archived' | 'test_isolated' | 'all_with_isolated'>('all');
   const [teacherPage, setTeacherPage] = useState(1);
   const [teacherPageSize, setTeacherPageSize] = useState(10);
   const [selectedTeacherUids, setSelectedTeacherUids] = useState<string[]>([]);
@@ -1098,7 +1135,11 @@ export const AdminDashboard: React.FC = () => {
               (t.phoneNumber || '').toLowerCase().includes(query);
 
             const matchesStatus =
-              teacherStatusFilter === 'all' || t.status === teacherStatusFilter;
+              teacherStatusFilter === 'all'
+                ? t.status !== 'test_isolated'
+                : teacherStatusFilter === 'all_with_isolated'
+                ? true
+                : t.status === teacherStatusFilter;
 
             return matchesSearch && matchesStatus;
           });
@@ -1196,11 +1237,12 @@ export const AdminDashboard: React.FC = () => {
                       }}
                       className="bg-white border border-slate-300 text-slate-700 text-xs font-bold rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
-                      <option value="all">Tất cả trạng thái ({teachers.length})</option>
+                      <option value="all">Giáo viên nghiệp vụ ({teachers.filter((t) => t.status !== 'test_isolated').length})</option>
                       <option value="active">Đang hoạt động ({teachers.filter((t) => t.status === 'active').length})</option>
                       <option value="pending_approval">Chờ duyệt ({teachers.filter((t) => t.status === 'pending_approval').length})</option>
                       <option value="suspended">Tạm khóa ({teachers.filter((t) => t.status === 'suspended').length})</option>
-                      <option value="archived">Đã lưu trữ ({teachers.filter((t) => t.status === 'archived').length})</option>
+                      <option value="test_isolated">Kiểm thử đã cách ly ({teachers.filter((t) => t.status === 'test_isolated').length})</option>
+                      <option value="all_with_isolated">Toàn bộ ({teachers.length})</option>
                     </select>
                   </div>
                 </div>
@@ -1358,6 +1400,10 @@ export const AdminDashboard: React.FC = () => {
                             ) : t.status === 'archived' ? (
                               <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded font-bold">
                                 Đã lưu trữ
+                              </span>
+                            ) : t.status === 'test_isolated' ? (
+                              <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded font-bold">
+                                Kiểm thử cách ly
                               </span>
                             ) : (
                               <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold">
@@ -2060,23 +2106,25 @@ export const AdminDashboard: React.FC = () => {
                   }>();
 
                   academicYears.forEach((ay) => {
-                    yearsMap.set(ay.code, {
-                      code: ay.code,
-                      name: ay.name,
-                      isCurrent: ay.isCurrent,
-                      periodType: ay.periodType,
-                      status: ay.status,
+                    const code = (typeof ay === 'string' ? ay : ay?.code) || (ay as any)?.id;
+                    if (!code) return;
+                    yearsMap.set(code, {
+                      code,
+                      name: ay.name || `Năm học ${code}`,
+                      isCurrent: Boolean(ay.isCurrent),
+                      periodType: ay.periodType || 'past',
+                      status: ay.status || 'active',
                       description: ay.description,
-                      totalClasses: ay.totalClasses,
-                      totalStudents: ay.totalStudents,
-                      canDelete: ay.canDelete
+                      totalClasses: typeof ay.totalClasses === 'number' ? ay.totalClasses : 0,
+                      totalStudents: typeof ay.totalStudents === 'number' ? ay.totalStudents : 0,
+                      canDelete: Boolean(ay.canDelete)
                     });
                   });
 
                   classes.forEach((c) => {
                     const yr = c.academicYear || '2025-2026';
                     if (!yearsMap.has(yr)) {
-                      const isCur = yr === '2026-2027';
+                      const isCur = yr === '2025-2026';
                       const isFut = yr > '2026-2027';
                       yearsMap.set(yr, {
                         code: yr,
@@ -2091,7 +2139,7 @@ export const AdminDashboard: React.FC = () => {
                     }
                   });
 
-                  const displayYears = Array.from(yearsMap.values()).sort((a, b) => b.code.localeCompare(a.code));
+                  const displayYears = Array.from(yearsMap.values()).sort((a, b) => (b.code || '').localeCompare(a.code || ''));
 
                   if (displayYears.length === 0) {
                     return (
@@ -3031,13 +3079,15 @@ export const AdminDashboard: React.FC = () => {
                 <label className="block text-xs font-bold text-slate-700 mb-1">Năm học</label>
                 <div className="flex gap-1.5 flex-wrap">
                   {Array.from(new Set([
-                    ...academicYears.map((ay) => ay.code),
-                    ...classes.map((c) => c.academicYear || '2025-2026'),
-                    ...(overview?.academicYearsList || []),
+                    ...academicYears.map((ay) => (typeof ay === 'string' ? ay : ay?.code || '')).filter(Boolean),
+                    ...classes.map((c) => c.academicYear || '2025-2026').filter(Boolean),
+                    ...(overview?.academicYearsList || []).filter(Boolean),
                     '2027-2028',
                     '2026-2027',
                     '2025-2026'
-                  ])).sort((a, b) => b.localeCompare(a)).map((yr) => (
+                  ])).filter((yr): yr is string => typeof yr === 'string' && yr.length > 0)
+                    .sort((a, b) => (b || '').localeCompare(a || ''))
+                    .map((yr) => (
                     <button
                       key={yr}
                       type="button"
@@ -3169,13 +3219,15 @@ export const AdminDashboard: React.FC = () => {
                 <label className="block text-xs font-bold text-slate-700 mb-1">Năm học</label>
                 <div className="flex gap-1.5 flex-wrap">
                   {Array.from(new Set([
-                    ...academicYears.map((ay) => ay.code),
-                    ...classes.map((c) => c.academicYear || '2025-2026'),
-                    ...(overview?.academicYearsList || []),
+                    ...academicYears.map((ay) => (typeof ay === 'string' ? ay : ay?.code || '')).filter(Boolean),
+                    ...classes.map((c) => c.academicYear || '2025-2026').filter(Boolean),
+                    ...(overview?.academicYearsList || []).filter(Boolean),
                     '2027-2028',
                     '2026-2027',
                     '2025-2026'
-                  ])).sort((a, b) => b.localeCompare(a)).map((yr) => (
+                  ])).filter((yr): yr is string => typeof yr === 'string' && yr.length > 0)
+                    .sort((a, b) => (b || '').localeCompare(a || ''))
+                    .map((yr) => (
                     <button
                       key={yr}
                       type="button"

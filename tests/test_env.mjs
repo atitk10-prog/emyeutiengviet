@@ -8,6 +8,7 @@ export const PROTECTED_PROJECT_IDS = Object.freeze([
   'em-yeu-tieng-viet-demo',
   'em-yeu-tieng-viet',
   'em-yeu-tieng-viet-staging',
+  'em-yeu-tieng-viet---staging',
   'em-yeu-tieng-viet-prod',
   'em-yeu-tieng-viet-production'
 ]);

@@ -116,13 +116,18 @@ async function handleGetAdminOverview(req: VercelApiRequest) {
   let totalTeachers = 0;
   let activeTeachers = 0;
   let pendingTeachers = 0;
+  let isolatedTestTeachers = 0;
 
   usersSnap.forEach((d) => {
     const u = d.data();
     if (u.role === 'teacher') {
-      totalTeachers++;
-      if (u.status === 'active') activeTeachers++;
-      if (u.status === 'pending_approval') pendingTeachers++;
+      if (u.status === 'test_isolated') {
+        isolatedTestTeachers++;
+      } else {
+        totalTeachers++;
+        if (u.status === 'active') activeTeachers++;
+        if (u.status === 'pending_approval') pendingTeachers++;
+      }
     }
   });
 
@@ -135,7 +140,8 @@ async function handleGetAdminOverview(req: VercelApiRequest) {
     totalAttempts: attemptsSnap.size,
     totalTeachers,
     activeTeachers,
-    pendingTeachers
+    pendingTeachers,
+    isolatedTestTeachers
   };
 }
 
@@ -228,10 +234,103 @@ async function handleGetCurriculumFramework(req: VercelApiRequest) {
 // 5. LIST ACADEMIC YEARS
 async function handleListAcademicYears(req: VercelApiRequest) {
   await requireAdmin(req);
+  const db = getDb();
+
+  const [aySnap, classesSnap, studentsSnap] = await Promise.all([
+    db.collection('academicYears').get(),
+    db.collection('classes').get(),
+    db.collection('students').get()
+  ]);
+
+  const configuredYears = new Map<string, any>();
+  aySnap.forEach((d) => {
+    configuredYears.set(d.id, { id: d.id, ...d.data() });
+  });
+
+  const allYearsSet = new Set<string>(configuredYears.keys());
+  const classToYear = new Map<string, string>();
+  classesSnap.forEach((d) => {
+    const yr = d.data().academicYear || '2025-2026';
+    allYearsSet.add(yr);
+    classToYear.set(d.id, yr);
+  });
+
+  // Ensure default standard years exist
+  allYearsSet.add('2025-2026');
+  allYearsSet.add('2026-2027');
+
+  const yearStudentsMap = new Map<string, Set<string>>();
+  allYearsSet.forEach((yr) => yearStudentsMap.set(yr, new Set<string>()));
+  studentsSnap.forEach((d) => {
+    const yr = classToYear.get(d.data().classId);
+    if (yr && yearStudentsMap.has(yr)) {
+      yearStudentsMap.get(yr)!.add(d.id);
+    }
+  });
+
+  let currentYearCode = '2025-2026';
+  for (const [code, data] of configuredYears.entries()) {
+    if (data.isCurrent) {
+      currentYearCode = code;
+      break;
+    }
+  }
+
+  const parseStartYear = (code: string): number => {
+    const match = String(code).match(/^(\d{4})/);
+    return match ? parseInt(match[1], 10) : 2025;
+  };
+  const currentStartYear = parseStartYear(currentYearCode);
+
+  const items = Array.from(allYearsSet)
+    .sort((a, b) => (b || '').localeCompare(a || ''))
+    .map((code) => {
+      const existing = configuredYears.get(code);
+      const startYear = parseStartYear(code);
+      const isCurrent = code === currentYearCode;
+
+      let periodType: 'past' | 'current' | 'future' = 'past';
+      if (isCurrent) {
+        periodType = 'current';
+      } else if (startYear > currentStartYear) {
+        periodType = 'future';
+      } else {
+        periodType = 'past';
+      }
+
+      let totalClasses = 0;
+      let activeClasses = 0;
+      classesSnap.forEach((d) => {
+        const c = d.data();
+        if ((c.academicYear || '2025-2026') === code) {
+          totalClasses++;
+          if (c.status !== 'archived') activeClasses++;
+        }
+      });
+
+      return {
+        id: code,
+        code,
+        name: existing?.name || `Năm học ${code}`,
+        isCurrent,
+        periodType,
+        status: existing?.status || 'active',
+        description: existing?.description || '',
+        startDate: existing?.startDate || '',
+        endDate: existing?.endDate || '',
+        totalClasses,
+        activeClasses,
+        totalStudents: yearStudentsMap.get(code)?.size || 0,
+        canDelete: totalClasses === 0,
+        createdAt: existing?.createdAt || Date.now(),
+        updatedAt: existing?.updatedAt || Date.now()
+      };
+    });
+
   return {
     success: true,
-    academicYears: ['2025-2026', '2026-2027'],
-    currentAcademicYear: '2025-2026'
+    academicYears: items,
+    currentAcademicYear: currentYearCode
   };
 }
 
