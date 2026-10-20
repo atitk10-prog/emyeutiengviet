@@ -859,7 +859,7 @@ async function handleSuggestRemediation(req: VercelApiRequest, data: any) {
     ? completedAttempts.filter((a) => a.studentId === targetStudentId)
     : completedAttempts;
 
-  const versionSkillCache: Record<string, Record<string, string>> = {};
+  const versionQuestionCache: Record<string, Record<string, { prompt: string; skillTag: string }>> = {};
   const neededVersionIds = Array.from(new Set(targetAttemptsForSkills.map((a) => a.lessonVersionId).filter(Boolean)));
   await Promise.all(
     neededVersionIds.map(async (vId) => {
@@ -867,13 +867,16 @@ async function handleSuggestRemediation(req: VercelApiRequest, data: any) {
       if (!sampleAtt) return;
       const vDoc = await db.collection('lessons').doc(sampleAtt.lessonId).collection('versions').doc(vId).get();
       const vData = vDoc.data();
-      const map: Record<string, string> = {};
+      const map: Record<string, { prompt: string; skillTag: string }> = {};
       if (vData && vData.publicQuestions) {
         vData.publicQuestions.forEach((q: any) => {
-          map[q.id] = q.skillTag || '';
+          map[q.id] = {
+            prompt: String(q.prompt || q.statement || '').trim(),
+            skillTag: q.skillTag || ''
+          };
         });
       }
-      versionSkillCache[vId] = map;
+      versionQuestionCache[vId] = map;
     })
   );
 
@@ -893,11 +896,13 @@ async function handleSuggestRemediation(req: VercelApiRequest, data: any) {
   await Promise.all(
     targetAttemptsForSkills.map(async (att) => {
       const sId = att.studentId;
-      const qMap = versionSkillCache[att.lessonVersionId] || {};
+      const qMap = versionQuestionCache[att.lessonVersionId] || {};
       const respSnap = await db.collection('attempts').doc(att.id).collection('responses').get();
       respSnap.forEach((rDoc) => {
         const r = rDoc.data();
-        const skill = qMap[r.questionId] || r.skillTag;
+        const qId = r.questionId || rDoc.id;
+        const qInfo = qMap[qId];
+        const skill = qInfo?.skillTag || r.skillTag || '';
         if (skill && skillAcc[skill]) {
           skillAcc[skill].tested++;
           if (r.firstTryCorrect) skillAcc[skill].firstTryCorrect++;
@@ -909,11 +914,11 @@ async function handleSuggestRemediation(req: VercelApiRequest, data: any) {
           if (r.firstTryCorrect) skillAcc[skill].byStudent[sId].firstTryCorrect++;
         }
 
-        const qId = r.questionId || rDoc.id;
         if (!questionErrorAcc[qId]) {
+          const rawPrompt = qInfo?.prompt || r.prompt || '';
           questionErrorAcc[qId] = {
             questionId: qId,
-            prompt: r.prompt || `Câu hỏi ${qId}`,
+            prompt: rawPrompt,
             skillTag: skill || 'chua_phan_loai',
             totalAnswered: 0,
             firstTryIncorrect: 0
@@ -973,14 +978,23 @@ async function handleSuggestRemediation(req: VercelApiRequest, data: any) {
 
   const highErrorQuestions = Object.values(questionErrorAcc)
     .filter((q) => q.totalAnswered >= 3 && Math.round((q.firstTryIncorrect / q.totalAnswered) * 100) >= 30)
-    .map((q) => ({
-      questionId: q.questionId,
-      prompt: q.prompt,
-      skillTag: q.skillTag,
-      errorRate: Math.round((q.firstTryIncorrect / q.totalAnswered) * 100),
-      incorrectCount: q.firstTryIncorrect,
-      totalCount: q.totalAnswered
-    }))
+    .map((q) => {
+      const errRate = Math.round((q.firstTryIncorrect / q.totalAnswered) * 100);
+      const displayPrompt = q.prompt
+        ? (q.prompt.length > 90 ? q.prompt.slice(0, 90) + '...' : q.prompt)
+        : `Câu hỏi ${q.questionId} (Nội dung chưa sẵn sàng)`;
+      return {
+        questionId: q.questionId,
+        prompt: displayPrompt,
+        skillTag: q.skillTag,
+        skillLabel: SKILL_LABELS[q.skillTag] || 'Kỹ năng đọc hiểu',
+        errorRate: errRate,
+        incorrectPercentage: errRate,
+        incorrectCount: q.firstTryIncorrect,
+        totalCount: q.totalAnswered,
+        testedCount: q.totalAnswered
+      };
+    })
     .sort((a, b) => b.errorRate - a.errorRate)
     .slice(0, 5);
 
@@ -1213,52 +1227,186 @@ BẮT BUỘC trả về định dạng JSON thuần dạng:
 // 4. LIST REMEDIATION ACTIVITIES
 async function handleListRemediationActivities(req: VercelApiRequest, data: any) {
   const { uid: teacherUid } = await requireTeacher(req);
-  const { classId } = data || {};
+  const { classId, academicYear, grade, activityType, status } = data || {};
   const db = getDb();
 
-  let query: FirebaseFirestore.Query = db.collection('remediationActivities').where('teacherUid', '==', teacherUid);
-  if (classId) query = query.where('classId', '==', classId);
-
-  const snap = await query.get();
+  const snap = await db.collection('remediationActivities').get();
   const activities: any[] = [];
-  snap.forEach((d) => activities.push({ id: d.id, ...d.data() }));
 
-  return { success: true, activities };
+  snap.forEach((doc) => {
+    const act = doc.data() as any;
+    const isOwner = act.teacherId === teacherUid || act.teacherUid === teacherUid;
+    if (!isOwner) return;
+
+    if (classId && classId !== 'all' && act.classId && act.classId !== classId) return;
+    if (academicYear && academicYear !== 'all' && act.academicYear && act.academicYear !== academicYear) return;
+    if (grade && grade !== 'all' && act.grade && Number(act.grade) !== Number(grade)) return;
+    if (activityType && activityType !== 'all' && act.activityType !== activityType) return;
+    if (status && status !== 'all' && act.status !== status) return;
+
+    activities.push({ id: doc.id, ...act });
+  });
+
+  activities.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+  return { success: true, activities, count: activities.length };
 }
 
 // 5. SAVE REMEDIATION ACTIVITY
 async function handleSaveRemediationActivity(req: VercelApiRequest, data: any) {
   const { uid: teacherUid } = await requireTeacher(req);
-  const { activity, classId } = data || {};
-  if (!activity) throw new ApiError(400, 'invalid-argument', 'Dữ liệu hoạt động không được để trống.');
+  const rawActivity = (data && data.activity) ? data.activity : data;
+  if (!rawActivity || typeof rawActivity !== 'object') {
+    throw new ApiError(400, 'invalid-argument', 'Dữ liệu hoạt động không được để trống.');
+  }
+
+  const cleanTitle = String(rawActivity.title || '').trim();
+  if (!cleanTitle || cleanTitle.length < 3) {
+    throw new ApiError(400, 'invalid-argument', 'Tên hoạt động phải có tối thiểu 3 ký tự.');
+  }
+
+  const activityId = (rawActivity.id && String(rawActivity.id).trim().length > 0)
+    ? String(rawActivity.id).trim()
+    : `act_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
   const db = getDb();
-  const ref = db.collection('remediationActivities').doc(activity.id || undefined);
-  const savedData = {
-    ...activity,
-    id: ref.id,
-    teacherUid,
-    classId: classId || activity.classId || null,
-    status: 'approved',
-    createdAt: Date.now(),
-    updatedAt: Date.now()
+  const ref = db.collection('remediationActivities').doc(activityId);
+  const existingDoc = await ref.get();
+
+  if (existingDoc.exists) {
+    const existing = existingDoc.data()!;
+    if (existing.teacherId && existing.teacherId !== teacherUid && existing.teacherUid !== teacherUid) {
+      throw new ApiError(403, 'permission-denied', 'Bạn không có quyền chỉnh sửa hoạt động của giáo viên khác.');
+    }
+  }
+
+  let teacherName = 'Giáo viên';
+  try {
+    const userDoc = await db.collection('users').doc(teacherUid).get();
+    if (userDoc.exists && userDoc.data()?.displayName) {
+      teacherName = userDoc.data()?.displayName;
+    }
+  } catch {}
+
+  const now = Date.now();
+  const isApproved = rawActivity.status === 'approved';
+
+  const activityRecord = {
+    ...rawActivity,
+    id: activityId,
+    teacherId: teacherUid,
+    teacherUid: teacherUid,
+    teacherName: existingDoc.data()?.teacherName || rawActivity.teacherName || teacherName,
+    title: cleanTitle,
+    academicYear: rawActivity.academicYear || existingDoc.data()?.academicYear || '2026-2027',
+    grade: Number(rawActivity.grade) || existingDoc.data()?.grade || 2,
+    classId: rawActivity.classId || existingDoc.data()?.classId || '',
+    className: rawActivity.className || existingDoc.data()?.className || '',
+    scope: rawActivity.scope || existingDoc.data()?.scope || 'toan_lop',
+    activityType: rawActivity.activityType || existingDoc.data()?.activityType || 'truy_tim_nghia_tu',
+    targetAudience: rawActivity.targetAudience || existingDoc.data()?.targetAudience || 'Toàn lớp',
+    targetSkill: rawActivity.targetSkill || existingDoc.data()?.targetSkill || 'thong_tin_truc_tiep',
+    skillObjective: String(rawActivity.skillObjective || existingDoc.data()?.skillObjective || '').trim(),
+    sourceLessonId: rawActivity.sourceLessonId || existingDoc.data()?.sourceLessonId || '',
+    sourceLessonTitle: rawActivity.sourceLessonTitle || existingDoc.data()?.sourceLessonTitle || '',
+    sourceQuestionId: rawActivity.sourceQuestionId || existingDoc.data()?.sourceQuestionId || '',
+    durationMinutes: Number(rawActivity.durationMinutes) || existingDoc.data()?.durationMinutes || 10,
+    materialsNeeded: Array.isArray(rawActivity.materialsNeeded) ? rawActivity.materialsNeeded : (existingDoc.data()?.materialsNeeded || []),
+    teacherSteps: Array.isArray(rawActivity.teacherSteps) ? rawActivity.teacherSteps : (existingDoc.data()?.teacherSteps || []),
+    contentPayload: rawActivity.contentPayload || existingDoc.data()?.contentPayload || { instructions: '' },
+    evaluationCriteria: String(rawActivity.evaluationCriteria || existingDoc.data()?.evaluationCriteria || '').trim(),
+    status: isApproved ? 'approved' : 'draft',
+    approvedAt: isApproved ? (existingDoc.data()?.approvedAt || now) : null,
+    approvedBy: isApproved ? (existingDoc.data()?.approvedBy || teacherName) : null,
+    createdAt: existingDoc.exists ? (existingDoc.data()?.createdAt || now) : now,
+    updatedAt: now
   };
 
-  await ref.set(savedData, { merge: true });
-  return { success: true, activity: savedData };
+  await ref.set(activityRecord, { merge: true });
+
+  return {
+    success: true,
+    activity: activityRecord,
+    message: isApproved
+      ? `Đã lưu và cập nhật hoạt động đã duyệt "${cleanTitle}".`
+      : `Đã lưu thành công bản nháp "${cleanTitle}".`
+  };
 }
 
 // 6. APPROVE REMEDIATION ACTIVITY
 async function handleApproveRemediationActivity(req: VercelApiRequest, data: any) {
   const { uid: teacherUid } = await requireTeacher(req);
-  const { activityId } = data || {};
-  if (!activityId) throw new ApiError(400, 'invalid-argument', 'Mã hoạt động không được để trống.');
+  const { activityId, updatedData } = data || {};
+  const targetId = activityId || updatedData?.id;
+  if (!targetId || typeof targetId !== 'string') {
+    throw new ApiError(400, 'invalid-argument', 'Mã hoạt động (activityId) không hợp lệ.');
+  }
 
   const db = getDb();
-  const ref = db.collection('remediationActivities').doc(activityId);
-  await ref.update({ status: 'approved', updatedAt: Date.now() });
+  const ref = db.collection('remediationActivities').doc(targetId);
+  const existingDoc = await ref.get();
 
-  return { success: true, message: 'Đã phê duyệt hoạt động củng cố.' };
+  let teacherName = 'Giáo viên';
+  try {
+    const userDoc = await db.collection('users').doc(teacherUid).get();
+    if (userDoc.exists && userDoc.data()?.displayName) {
+      teacherName = userDoc.data()?.displayName;
+    }
+  } catch {}
+
+  const now = Date.now();
+  let baseData: any = {};
+
+  if (existingDoc.exists) {
+    const existing = existingDoc.data()!;
+    if (existing.teacherId && existing.teacherId !== teacherUid && existing.teacherUid !== teacherUid) {
+      throw new ApiError(403, 'permission-denied', 'Bạn chỉ có thể phê duyệt hoạt động do mình quản lý.');
+    }
+    baseData = existing;
+  } else if (!updatedData || typeof updatedData !== 'object') {
+    throw new ApiError(404, 'not-found', 'Không tìm thấy hoạt động cần duyệt trong hệ thống.');
+  }
+
+  const merged = { ...baseData, ...(updatedData || {}) };
+  const cleanTitle = String(merged.title || '').trim();
+  if (!cleanTitle || cleanTitle.length < 3) {
+    throw new ApiError(400, 'invalid-argument', 'Tên hoạt động cần tối thiểu 3 ký tự để phê duyệt.');
+  }
+  const cleanObjective = String(merged.skillObjective || merged.description || '').trim();
+  if (!cleanObjective || cleanObjective.length < 5) {
+    throw new ApiError(400, 'invalid-argument', 'Mục tiêu GDPT 2018 cần tối thiểu 5 ký tự để phê duyệt.');
+  }
+  const teacherSteps = Array.isArray(merged.teacherSteps)
+    ? merged.teacherSteps.filter((s: any) => String(s || '').trim().length > 0)
+    : [];
+  if (teacherSteps.length === 0) {
+    throw new ApiError(400, 'invalid-argument', 'Cần tối thiểu 1 bước tổ chức sư phạm trước khi phê duyệt.');
+  }
+
+  const approvedRecord = {
+    ...merged,
+    id: targetId,
+    teacherId: teacherUid,
+    teacherUid: teacherUid,
+    teacherName: merged.teacherName || teacherName,
+    title: cleanTitle,
+    skillObjective: cleanObjective,
+    teacherSteps,
+    materialsNeeded: Array.isArray(merged.materialsNeeded) ? merged.materialsNeeded : [],
+    status: 'approved',
+    approvedAt: now,
+    approvedBy: teacherName,
+    updatedAt: now
+  };
+
+  await ref.set(approvedRecord, { merge: true });
+
+  return {
+    success: true,
+    activity: approvedRecord,
+    approvedAt: now,
+    approvedBy: teacherName,
+    message: 'Đã phê duyệt hoạt động củng cố thành công.'
+  };
 }
 
 // 7. DELETE REMEDIATION ACTIVITY
@@ -1270,7 +1418,7 @@ async function handleDeleteRemediationActivity(req: VercelApiRequest, data: any)
   const db = getDb();
   const ref = db.collection('remediationActivities').doc(activityId);
   const doc = await ref.get();
-  if (doc.exists && doc.data()?.teacherUid === teacherUid) {
+  if (doc.exists && (doc.data()?.teacherUid === teacherUid || doc.data()?.teacherId === teacherUid)) {
     await ref.delete();
   }
 

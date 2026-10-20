@@ -2059,7 +2059,7 @@ export const TeacherDashboard: React.FC = () => {
       };
 
       const saveFunc = httpsCallable(functions, 'saveRemediationActivity');
-      const res: any = await saveFunc(payload);
+      const res: any = await saveFunc({ activity: payload, ...payload });
 
       if (res.data?.success) {
         const saved = res.data.activity as RemediationActivity;
@@ -8919,14 +8919,14 @@ export const TeacherDashboard: React.FC = () => {
                             <div key={idx} className="p-4 bg-rose-50/40 border border-rose-200 rounded-2xl space-y-2">
                               <div className="flex items-center justify-between text-xs font-bold">
                                 <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-black">
-                                  {q.skillLabel}
+                                  {q.skillLabel || 'Kỹ năng đọc hiểu'}
                                 </span>
                                 <span className="text-rose-700 font-black">
                                   Sai {q.incorrectPercentage}%
                                 </span>
                               </div>
-                              <p className="text-xs font-bold text-slate-900 line-clamp-2">
-                                "{q.prompt}"
+                              <p className="text-xs font-bold text-slate-900 line-clamp-2" title={q.prompt}>
+                                {q.prompt?.startsWith('Câu hỏi ') ? q.prompt : `"${q.prompt}"`}
                               </p>
                               <div className="text-[11px] text-slate-500">
                                 {q.incorrectCount} / {q.testedCount} lượt làm trả lời sai ở lần đầu

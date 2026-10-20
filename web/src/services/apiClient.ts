@@ -56,7 +56,9 @@ export const MIGRATED_LESSON_ACTIONS = new Set<string>([
   'updateLessonScope',
   'assignLesson',
   'getAIStatus',
-  'testAIConnection'
+  'testAIConnection',
+  'generateLessonAudioWithAI',
+  'approveLessonAudio'
 ]);
 
 // Migrated actions in /api/attempts

@@ -94,6 +94,14 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
         result = await handleTestAIConnection();
         break;
 
+      case 'generateLessonAudioWithAI':
+        result = await handleGenerateLessonAudioWithAI(req, data);
+        break;
+
+      case 'approveLessonAudio':
+        result = await handleApproveLessonAudio(req, data);
+        break;
+
       default:
         throw new ApiError(
           400,
@@ -953,4 +961,247 @@ async function handleTestAIConnection() {
       error: `Không thể kết nối tới Google Gemini: ${err.message}`
     };
   }
+}
+
+// 13. GENERATE LESSON AUDIO WITH AI (Gemini TTS)
+async function handleGenerateLessonAudioWithAI(req: VercelApiRequest, data: any) {
+  const { uid: teacherUid } = await requireTeacher(req);
+  const { passage, title, grade, voiceGender, readingStyle, lessonId, engine } = data || {};
+
+  if (!passage || typeof passage !== 'string' || passage.trim().length < 20) {
+    throw new ApiError(
+      400,
+      'invalid-argument',
+      'Văn bản bài đọc quá ngắn hoặc không hợp lệ để tạo giọng đọc AI (tối thiểu 20 ký tự).'
+    );
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey.trim().length <= 5) {
+    throw new ApiError(
+      503,
+      'unavailable',
+      'Chưa cấu hình GEMINI_API_KEY trên môi trường Production. Vui lòng kiểm tra biến môi trường trong Vercel Settings.'
+    );
+  }
+
+  const cleanPassage = passage.trim();
+  const voiceId = voiceGender === 'male' ? 'Puck' : 'Aoede';
+  const requestId = `tts_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+  // Candidate models: primary gemini-3.8-flash-lite-tts, fallback gemini-2.0-flash
+  const candidateModels = ['gemini-3.8-flash-lite-tts', 'gemini-2.0-flash'];
+  let audioBuffer: Buffer | null = null;
+  let activeModel = candidateModels[0];
+  let lastError: any = null;
+
+  for (const model of candidateModels) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
+      const payload = {
+        contents: [{ parts: [{ text: cleanPassage }] }],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: voiceId
+              }
+            }
+          }
+        }
+      };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorJson: any = null;
+        try { errorJson = JSON.parse(errorText); } catch {}
+        const msg = errorJson?.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+
+        if (response.status === 429) {
+          throw new ApiError(
+            429,
+            'resource-exhausted',
+            `Hạn mức dịch vụ Gemini TTS tạm thời bị giới hạn (Quota 429). Mã yêu cầu: ${requestId}. Vui lòng đợi 1–2 phút rồi thử lại.`
+          );
+        }
+
+        if (response.status === 404) {
+          lastError = new Error(`Mô hình ${model} không khả dụng (${msg}).`);
+          continue;
+        }
+
+        throw new ApiError(
+          response.status >= 400 && response.status < 500 ? response.status : 502,
+          'failed-precondition',
+          `Lỗi máy chủ Gemini TTS (Mã yêu cầu: ${requestId}, HTTP ${response.status}): ${msg}`
+        );
+      }
+
+      const resJson: any = await response.json();
+      const candidate = resJson.candidates?.[0];
+      const audioPart = candidate?.content?.parts?.find((p: any) => p.inlineData && p.inlineData.data);
+      if (!audioPart) {
+        throw new ApiError(
+          502,
+          'internal',
+          `Dịch vụ Gemini TTS không trả về dữ liệu âm thanh hợp lệ (Mã yêu cầu: ${requestId}).`
+        );
+      }
+
+      audioBuffer = Buffer.from(audioPart.inlineData.data, 'base64');
+      activeModel = model;
+      break;
+    } catch (err: any) {
+      if (err instanceof ApiError) throw err;
+      lastError = err;
+    }
+  }
+
+  if (!audioBuffer) {
+    throw new ApiError(
+      502,
+      'internal',
+      `Không thể tạo âm thanh từ Gemini TTS (Mã yêu cầu: ${requestId}): ${lastError?.message || 'Lỗi không xác định.'}`
+    );
+  }
+
+  // Calculate duration
+  let byteRate = 48000;
+  if (audioBuffer.length >= 32) {
+    const headerByteRate = audioBuffer.readUInt32LE(28);
+    if (headerByteRate > 8000 && headerByteRate < 192000) {
+      byteRate = headerByteRate;
+    }
+  }
+  const dataSize = Math.max(0, audioBuffer.length - 44);
+  const durationSeconds = Math.round((dataSize / byteRate) * 10) / 10;
+
+  // Persist to Cloud Firestore in chunks
+  const db = getDb();
+  const timestamp = Date.now();
+  const safeLessonId = (lessonId || 'new_lesson').replace(/[^a-zA-Z0-9_-]/g, '');
+  const fileId = `tts_${safeLessonId}_${voiceGender === 'male' ? 'male_puck' : 'female_aoede'}_${timestamp}`;
+  const fileName = `${fileId}.wav`;
+
+  const base64Str = audioBuffer.toString('base64');
+  const CHUNK_SIZE = 500000; // ~500KB per chunk in base64
+  const chunkCount = Math.ceil(base64Str.length / CHUNK_SIZE);
+
+  const fileDocRef = db.collection('audioStorage').doc(fileId);
+  await fileDocRef.set({
+    fileId,
+    fileName,
+    mimeType: 'audio/wav',
+    sizeBytes: audioBuffer.length,
+    durationSeconds,
+    chunkCount,
+    model: activeModel,
+    voiceId,
+    teacherUid,
+    lessonId: lessonId || null,
+    createdAt: timestamp
+  });
+
+  const chunkPromises = [];
+  for (let i = 0; i < chunkCount; i++) {
+    const chunkData = base64Str.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+    chunkPromises.push(
+      fileDocRef.collection('chunks').doc(String(i).padStart(4, '0')).set({
+        chunkIndex: i,
+        data: chunkData
+      })
+    );
+  }
+  await Promise.all(chunkPromises);
+
+  const audioUrl = `/api/audio?id=${fileId}`;
+
+  const metadata = {
+    lessonId: lessonId || undefined,
+    storagePath: `audioStorage/${fileId}`,
+    audioUrl,
+    downloadUrl: audioUrl,
+    engine: 'gemini_tts',
+    model: activeModel,
+    voiceId,
+    duration: Math.round(durationSeconds),
+    durationSeconds: Math.round(durationSeconds),
+    size: audioBuffer.length,
+    sizeBytes: audioBuffer.length,
+    status: 'pending_approval',
+    approvalStatus: 'pending_review',
+    voiceType: 'gemini_tts',
+    createdAt: new Date().toISOString(),
+    uploadedAt: new Date().toISOString(),
+    uploadedBy: teacherUid,
+    fileName,
+    mimeType: 'audio/wav'
+  };
+
+  return {
+    success: true,
+    metadata,
+    audioUrl,
+    downloadUrl: audioUrl,
+    durationSeconds,
+    voiceId,
+    model: activeModel,
+    engine: 'gemini_tts',
+    message: `Gemini AI đã tạo thành công giọng đọc trực tuyến (~${durationSeconds}s, giọng ${voiceId}, mô hình ${activeModel})!`
+  };
+}
+
+// 14. APPROVE LESSON AUDIO
+async function handleApproveLessonAudio(req: VercelApiRequest, data: any) {
+  const { uid: teacherUid } = await requireTeacher(req);
+  const { lessonId, versionId, audioUrl, metadata } = data || {};
+
+  if (!lessonId) {
+    throw new ApiError(400, 'invalid-argument', 'Mã bài đọc (lessonId) không được để trống.');
+  }
+
+  const db = getDb();
+  const lessonDoc = await db.collection('lessons').doc(lessonId).get();
+  if (!lessonDoc.exists) {
+    throw new ApiError(404, 'not-found', 'Bài đọc không tồn tại.');
+  }
+
+  const lessonData = lessonDoc.data()!;
+  const targetVersionId = versionId || lessonData.currentVersionId;
+  const realAudioUrl = audioUrl || metadata?.audioUrl;
+
+  if (targetVersionId) {
+    const vRef = db.collection('lessons').doc(lessonId).collection('versions').doc(targetVersionId);
+    await vRef.set(
+      {
+        audioUrl: realAudioUrl,
+        audioMetadata: metadata || null,
+        updatedAt: Date.now()
+      },
+      { merge: true }
+    );
+  }
+
+  // Also update parent lesson document
+  await db.collection('lessons').doc(lessonId).set(
+    {
+      audioUrl: realAudioUrl,
+      audioMetadata: metadata || null,
+      updatedAt: Date.now()
+    },
+    { merge: true }
+  );
+
+  return {
+    success: true,
+    audioUrl: realAudioUrl,
+    message: 'Đã phê duyệt và lưu giọng đọc AI vào bài học thành công.'
+  };
 }
