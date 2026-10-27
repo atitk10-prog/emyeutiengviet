@@ -98,20 +98,22 @@ async function handleGetAdminOverview(req: VercelApiRequest) {
   const db = getDb();
 
   const [
-    usersSnap,
-    classesSnap,
-    studentsSnap,
-    lessonsSnap,
-    assignmentsSnap,
-    attemptsSnap,
+    teachersSnap,
+    classesCountSnap,
+    studentsCountSnap,
+    lessonsCountSnap,
+    assignmentsCountSnap,
+    attemptsCountSnap,
+    completedAttemptsCountSnap,
     curriculumSnap
   ] = await Promise.all([
-    db.collection('users').get(),
-    db.collection('classes').get(),
-    db.collection('students').get(),
-    db.collection('lessons').get(),
-    db.collection('assignments').get(),
-    db.collection('attempts').get(),
+    db.collection('users').where('role', '==', 'teacher').get(),
+    db.collection('classes').count().get(),
+    db.collection('students').count().get(),
+    db.collection('lessons').count().get(),
+    db.collection('assignments').count().get(),
+    db.collection('attempts').count().get(),
+    db.collection('attempts').where('status', '==', 'completed').count().get(),
     db.collection('curriculumNodes').get()
   ]);
 
@@ -120,16 +122,14 @@ async function handleGetAdminOverview(req: VercelApiRequest) {
   let pendingTeachers = 0;
   let isolatedTestTeachers = 0;
 
-  usersSnap.forEach((d) => {
+  teachersSnap.forEach((d) => {
     const u = d.data();
-    if (u.role === 'teacher') {
-      if (u.status === 'test_isolated') {
-        isolatedTestTeachers++;
-      } else {
-        totalTeachers++;
-        if (u.status === 'active') activeTeachers++;
-        if (u.status === 'pending_approval') pendingTeachers++;
-      }
+    if (u.status === 'test_isolated') {
+      isolatedTestTeachers++;
+    } else {
+      totalTeachers++;
+      if (u.status === 'active') activeTeachers++;
+      if (u.status === 'pending_approval') pendingTeachers++;
     }
   });
 
@@ -142,21 +142,17 @@ async function handleGetAdminOverview(req: VercelApiRequest) {
     }
   });
 
-  let completedAttempts = 0;
-  let inProgressAttempts = 0;
-  attemptsSnap.forEach((d) => {
-    const a = d.data();
-    if (a.status === 'completed') completedAttempts++;
-    else inProgressAttempts++;
-  });
+  const totalAttempts = attemptsCountSnap.data().count;
+  const completedAttempts = completedAttemptsCountSnap.data().count;
+  const inProgressAttempts = Math.max(0, totalAttempts - completedAttempts);
 
   return {
     success: true,
-    totalClasses: classesSnap.size,
-    totalStudents: studentsSnap.size,
-    totalLessons: lessonsSnap.size,
-    totalAssignments: assignmentsSnap.size,
-    totalAttempts: attemptsSnap.size,
+    totalClasses: classesCountSnap.data().count,
+    totalStudents: studentsCountSnap.data().count,
+    totalLessons: lessonsCountSnap.data().count,
+    totalAssignments: assignmentsCountSnap.data().count,
+    totalAttempts,
     completedAttempts,
     inProgressAttempts,
     totalTeachers,

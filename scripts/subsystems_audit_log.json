@@ -1,0 +1,106 @@
+[
+  {
+    "stage": "2.A",
+    "subsystem": "Admin",
+    "action": "Xác thực tài khoản Admin & Role Check",
+    "status": "PASS",
+    "durationMs": 1112,
+    "details": "Đăng nhập thành công UID: fts9esJAKjfOpbABTPF7ru5dgdz1, role: admin"
+  },
+  {
+    "stage": "2.A",
+    "subsystem": "Admin",
+    "action": "Lấy số liệu tổng quan hệ thống (Admin Overview)",
+    "status": "PASS",
+    "durationMs": 247,
+    "details": "Thực tế: 2 giáo viên, 10 lớp, 200 học sinh, 21 bài đọc, 30 bài giao"
+  },
+  {
+    "stage": "2.A",
+    "subsystem": "Admin",
+    "action": "Quản lý danh sách giáo viên & trạng thái",
+    "status": "PASS",
+    "durationMs": 63,
+    "details": "Tìm thấy 2 giáo viên. Trạng thái active: Có"
+  },
+  {
+    "stage": "2.A",
+    "subsystem": "Admin",
+    "action": "Đọc khung chương trình & Năm học",
+    "status": "PASS",
+    "durationMs": 71,
+    "details": "Khung chương trình: 0 mục, Năm học: 1 năm học"
+  },
+  {
+    "stage": "2.B",
+    "subsystem": "Teacher",
+    "action": "Xác thực tài khoản Giáo viên & Role Check",
+    "status": "PASS",
+    "durationMs": 285,
+    "details": "Đăng nhập thành công UID: B5H9PeMrZowS3ewPm4BQ8aM4fkU1, role: teacher"
+  },
+  {
+    "stage": "2.B",
+    "subsystem": "Teacher",
+    "action": "Quản lý lớp học của giáo viên",
+    "status": "PASS",
+    "durationMs": 62,
+    "details": "Giáo viên sở hữu/quản lý lớp: 10 lớp (Mẫu: class_2a)"
+  },
+  {
+    "stage": "2.B",
+    "subsystem": "Teacher",
+    "action": "Lấy danh sách học sinh theo lớp",
+    "status": "PASS",
+    "durationMs": 82,
+    "details": "Lớp class_2a có 19 học sinh có mã truy cập"
+  },
+  {
+    "stage": "2.B",
+    "subsystem": "Teacher",
+    "action": "Thư viện bài đọc & kiểm soát xuất bản",
+    "status": "PASS",
+    "durationMs": 69,
+    "details": "Tổng 21 bài đọc: 20 đã xuất bản, 1 bản nháp"
+  },
+  {
+    "stage": "2.B",
+    "subsystem": "Teacher",
+    "action": "Truy xuất báo cáo lượt làm bài & thống kê kỹ năng",
+    "status": "PASS",
+    "durationMs": 93,
+    "details": "Đọc mẫu 50 lượt làm: 45 lượt đã hoàn thành"
+  },
+  {
+    "stage": "2.C",
+    "subsystem": "Student",
+    "action": "Xác thực tài khoản học sinh HS002",
+    "status": "PASS",
+    "durationMs": 240,
+    "details": "Học sinh: Trần Thu Phương Linh (HS002) xác thực chính xác."
+  },
+  {
+    "stage": "2.C",
+    "subsystem": "Student",
+    "action": "Truy vấn bài tập được giao theo lớp học",
+    "status": "PASS",
+    "durationMs": 116,
+    "details": "Lớp class_2a có 5 bài tập đang active"
+  },
+  {
+    "stage": "2.C",
+    "subsystem": "Student",
+    "action": "Kiểm tra chống lộ khoá đáp án (Zero Leakage Check)",
+    "status": "PASS",
+    "durationMs": 120,
+    "details": "100% publicQuestions không chứa đáp án bí mật"
+  },
+  {
+    "stage": "3",
+    "subsystem": "Database",
+    "action": "Kiểm toán tính toàn vẹn liên kết (Referential Integrity)",
+    "status": "PASS",
+    "durationMs": 1861,
+    "details": "Lớp mồ côi: 0, Học sinh không thuộc lớp: 0, Phiên bản thiếu privateAnswerKey: 0"
+  }
+]

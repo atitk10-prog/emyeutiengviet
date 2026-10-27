@@ -157,6 +157,25 @@ export const ReadingMission: React.FC = () => {
     }
   };
 
+  const handleSkipQuestion = (questionId: string) => {
+    // Safety fallback: allow student to skip a question that has missing or corrupted data without score penalty
+    setResponsesMap((prev) => ({
+      ...prev,
+      [questionId]: {
+        skipped: true,
+        firstTryCorrect: true,
+        finalCorrect: true,
+        recordedAt: new Date().toISOString()
+      }
+    }));
+    const total = (lessonVersion?.publicQuestions || []).length;
+    if (currentQuestionIdx < total - 1) {
+      handleNextQuestion();
+    } else {
+      handleFinishAttempt();
+    }
+  };
+
   const handleFinishAttempt = async () => {
     if (!attemptId || finishing) return;
 
@@ -259,8 +278,12 @@ export const ReadingMission: React.FC = () => {
   const totalQuestions = publicQuestions.length;
   const currentQuestion = publicQuestions[currentQuestionIdx];
   const answeredQuestionsCount = Object.keys(responsesMap).filter(
-    (k) => responsesMap[k]?.firstTryCorrect || responsesMap[k]?.retryAnswer !== undefined
+    (k) =>
+      responsesMap[k]?.firstTryCorrect !== undefined ||
+      responsesMap[k]?.retryAnswer !== undefined ||
+      responsesMap[k]?.skipped
   ).length;
+  const progressPercent = totalQuestions > 0 ? Math.round((answeredQuestionsCount / totalQuestions) * 100) : 0;
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -391,13 +414,13 @@ export const ReadingMission: React.FC = () => {
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-sky-100 flex items-center justify-between gap-4">
             <div className="flex-1 max-w-md">
               <div className="flex items-center justify-between text-xs font-bold text-slate-500 mb-1.5">
-                <span>Câu {currentQuestionIdx + 1} / {totalQuestions}</span>
-                <span>{Math.round(((currentQuestionIdx + 1) / totalQuestions) * 100)}%</span>
+                <span>Đang xem câu {currentQuestionIdx + 1} / {totalQuestions}</span>
+                <span>Đã làm: {answeredQuestionsCount} / {totalQuestions} ({progressPercent}%)</span>
               </div>
               <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
                 <div
                   className="bg-gradient-to-r from-sky-400 to-primary-600 h-full transition-all duration-300 rounded-full"
-                  style={{ width: `${((currentQuestionIdx + 1) / totalQuestions) * 100}%` }}
+                  style={{ width: `${progressPercent}%` }}
                 />
               </div>
             </div>
@@ -446,6 +469,7 @@ export const ReadingMission: React.FC = () => {
               onNextQuestion={handleNextQuestion}
               isLastQuestion={currentQuestionIdx === totalQuestions - 1}
               onFinishMission={handleFinishAttempt}
+              onSkipQuestion={handleSkipQuestion}
             />
           )}
 
@@ -453,7 +477,11 @@ export const ReadingMission: React.FC = () => {
           <div className="flex items-center justify-center gap-2 pt-2">
             {publicQuestions.map((q, idx) => {
               const resp = responsesMap[q.id];
-              const isAnswered = Boolean(resp?.firstTryCorrect || resp?.retryAnswer !== undefined);
+              const isAnswered = Boolean(
+                resp?.firstTryCorrect !== undefined ||
+                resp?.retryAnswer !== undefined ||
+                resp?.skipped
+              );
               const isCurrent = idx === currentQuestionIdx;
 
               return (

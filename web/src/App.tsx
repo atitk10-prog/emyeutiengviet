@@ -1,17 +1,38 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Navbar } from './components/Navbar';
 import { HomePage } from './pages/HomePage';
 import { StudentLogin } from './pages/StudentLogin';
-import { StudentLibrary } from './pages/StudentLibrary';
-import { ReadingMission } from './pages/ReadingMission';
-import { MissionCompleted } from './pages/MissionCompleted';
-import { StudentReview } from './pages/StudentReview';
 import { TeacherLogin } from './pages/TeacherLogin';
-import { TeacherDashboard } from './pages/TeacherDashboard';
 import { AdminLogin } from './pages/AdminLogin';
-import { AdminDashboard } from './pages/AdminDashboard';
+
+// Lazy load large role dashboards and interactive mission pages
+const TeacherDashboard = lazy(() =>
+  import('./pages/TeacherDashboard').then((m) => ({ default: m.TeacherDashboard }))
+);
+const AdminDashboard = lazy(() =>
+  import('./pages/AdminDashboard').then((m) => ({ default: m.AdminDashboard }))
+);
+const StudentLibrary = lazy(() =>
+  import('./pages/StudentLibrary').then((m) => ({ default: m.StudentLibrary }))
+);
+const ReadingMission = lazy(() =>
+  import('./pages/ReadingMission').then((m) => ({ default: m.ReadingMission }))
+);
+const MissionCompleted = lazy(() =>
+  import('./pages/MissionCompleted').then((m) => ({ default: m.MissionCompleted }))
+);
+const StudentReview = lazy(() =>
+  import('./pages/StudentReview').then((m) => ({ default: m.StudentReview }))
+);
+
+const PageFallback: React.FC<{ text?: string }> = ({ text = 'Đang tải giao diện...' }) => (
+  <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-slate-500">
+    <div className="w-9 h-9 border-3 border-emerald-200 border-t-emerald-600 rounded-full animate-spin mb-3" />
+    <span className="text-xs font-bold text-slate-600 tracking-wide">{text}</span>
+  </div>
+);
 
 // Guard for admin routes
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -26,7 +47,7 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   if (!user || !isAdmin) {
     return <Navigate to="/admin/login" replace />;
   }
-  return <>{children}</>;
+  return <Suspense fallback={<PageFallback text="Đang mở Bảng Quản trị..." />}>{children}</Suspense>;
 };
 
 // Guard for teacher routes
@@ -42,7 +63,7 @@ const TeacherRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   if (!user || !isTeacher) {
     return <Navigate to="/teacher/login" replace />;
   }
-  return <>{children}</>;
+  return <Suspense fallback={<PageFallback text="Đang mở Bảng Giáo viên..." />}>{children}</Suspense>;
 };
 
 // Guard for student routes
@@ -58,7 +79,7 @@ const StudentRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   if (!studentSession) {
     return <Navigate to="/student/join" replace />;
   }
-  return <>{children}</>;
+  return <Suspense fallback={<PageFallback text="Đang mở phòng học..." />}>{children}</Suspense>;
 };
 
 export const App: React.FC = () => {

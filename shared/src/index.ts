@@ -937,3 +937,8 @@ export const DEFAULT_CURRICULUM_PROGRESS: CurriculumProgressConfig = {
   updatedBy: 'system_admin'
 };
 
+// ==========================================
+// 12. ANSWER EVALUATION & QUESTION SANITIZER
+// ==========================================
+export * from './answerEvaluator.js';
+

@@ -32,7 +32,9 @@ import {
   getAnalysisScopeLabel,
   RemediationActivity,
   RemediationActivityType,
-  REMEDIATION_ACTIVITY_LABELS
+  REMEDIATION_ACTIVITY_LABELS,
+  checkAnswerCorrectness,
+  cleanOptionText
 } from '@emytv/shared';
 import {
   ResponsiveContainer,
@@ -119,6 +121,8 @@ export const TeacherDashboard: React.FC = () => {
 
   // Loading states
   const [loading, setLoading] = useState(false);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(true);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Data states
@@ -366,26 +370,21 @@ export const TeacherDashboard: React.FC = () => {
 
   const loadDashboardData = async () => {
     setLoading(true);
-    try {
-      // 1. Fetch AI Status
+    setAnalyticsError(null);
+
+    // 1. Fetch AI Status in background (non-blocking)
+    const pAI = (async () => {
       try {
         const getStatus = httpsCallable(functions, 'getAIStatus');
         const sRes: any = await getStatus({});
-        setAiStatus(sRes.data);
+        if (sRes?.data) setAiStatus(sRes.data);
       } catch (e) {
         console.warn('Could not fetch AI status:', e);
       }
+    })();
 
-      // 2. Fetch Analytics
-      try {
-        const getAnalytics = httpsCallable(functions, 'getTeacherAnalytics');
-        const aRes: any = await getAnalytics({});
-        setAnalytics(aRes.data);
-      } catch (e) {
-        console.warn('Could not fetch analytics:', e);
-      }
-
-      // 2. Fetch Classes via getTeacherClasses API (handles auth permissions reliably)
+    // 2. Fetch Classes via getTeacherClasses API
+    const pClasses = (async () => {
       try {
         const getClassesFn = createCallable('getTeacherClasses');
         const cRes: any = await getClassesFn({});
@@ -432,8 +431,10 @@ export const TeacherDashboard: React.FC = () => {
           }
         }
       }
+    })();
 
-      // 3. Fetch Lessons via getTeacherLessons Cloud Function
+    // 3. Fetch Lessons via getTeacherLessons Cloud Function
+    const pLessons = (async () => {
       if (user) {
         try {
           const getLessonsFunc = httpsCallable(functions, 'getTeacherLessons');
@@ -459,8 +460,30 @@ export const TeacherDashboard: React.FC = () => {
           }
         }
       }
+    })();
+
+    // 4. Fetch Analytics asynchronously in parallel (non-blocking for UI interaction)
+    setLoadingAnalytics(true);
+    const pAnalytics = (async () => {
+      try {
+        const getAnalytics = httpsCallable(functions, 'getTeacherAnalytics');
+        const aRes: any = await getAnalytics({});
+        if (aRes?.data) {
+          setAnalytics(aRes.data);
+        }
+      } catch (e: any) {
+        console.warn('Could not fetch analytics:', e);
+        setAnalyticsError('Không thể tải dữ liệu thống kê đọc hiểu. Bấm để thử lại.');
+      } finally {
+        setLoadingAnalytics(false);
+      }
+    })();
+
+    // Await ESSENTIAL data (Classes and Lessons in parallel) so UI becomes interactive in ~1-2s
+    try {
+      await Promise.all([pClasses, pLessons]);
     } catch (err: any) {
-      console.error('Error loading dashboard data:', err);
+      console.error('Error loading essential dashboard data:', err);
     } finally {
       setLoading(false);
     }
@@ -1828,23 +1851,39 @@ export const TeacherDashboard: React.FC = () => {
       const res: any = await getDetail({ lessonId: lesson.id, versionId });
       if (res.data?.success) {
         const { version, lesson: lData, privateAnswers } = res.data;
-        const questions = (version?.publicQuestions || []).map((q: any) => {
+        let questions = (version?.publicQuestions || []).map((q: any) => {
           const pAns = getQuestionPrivateAnswer(privateAnswers, q.id);
+          const ans = pAns?.answer !== undefined ? pAns.answer : (q.correctAnswer !== undefined ? q.correctAnswer : q.answer);
           return {
             ...q,
-            correctAnswer: pAns?.answer !== undefined ? pAns.answer : q.answer,
-            hint: pAns?.hint || q.hint,
-            explanation: pAns?.explanation || ''
+            correctAnswer: ans,
+            answer: ans,
+            hint: pAns?.hint || q.hint || '',
+            explanation: pAns?.explanation || q.explanation || ''
           };
         });
 
+        // Fallback to draftData questions if published version has empty questions
+        if ((!questions || questions.length === 0) && lData.draftData?.questions?.length > 0) {
+          questions = lData.draftData.questions.map((q: any) => {
+            const ans = q.correctAnswer !== undefined ? q.correctAnswer : q.answer;
+            return {
+              ...q,
+              correctAnswer: ans,
+              answer: ans,
+              hint: q.hint || '',
+              explanation: q.explanation || ''
+            };
+          });
+        }
+
         setPreviewModalLesson({
           title: version?.title || lData.title,
-          passage: version?.passage || '',
+          passage: version?.passage || lData.passage || '',
           grade: version?.grade || lData.grade,
           topic: version?.topic || lData.topic,
-          audioUrl: version?.audioUrl || undefined,
-          vocabulary: version?.vocabulary || [],
+          audioUrl: version?.audioUrl || lData.audioUrl || undefined,
+          vocabulary: version?.vocabulary || lData.vocabulary || [],
           questions
         });
         setPreviewQuestionIdx(0);
@@ -2521,17 +2560,27 @@ export const TeacherDashboard: React.FC = () => {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
               <span className="text-xs font-bold text-slate-400 uppercase">Lớp quản lý</span>
-              <div className="text-3xl font-black text-slate-900 mt-1">{classes.length}</div>
-              <div className="text-[11px] font-semibold text-emerald-600 mt-1">Đang hoạt động</div>
+              <div className="text-3xl font-black text-slate-900 mt-1">
+                {loading ? <span className="inline-block w-10 h-8 bg-slate-100 animate-pulse rounded-lg" /> : classes.length}
+              </div>
+              <div className="text-[11px] font-semibold text-emerald-600 mt-1">
+                {loading ? 'Đang đồng bộ...' : 'Đang hoạt động'}
+              </div>
             </div>
 
             <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
               <span className="text-xs font-bold text-slate-400 uppercase">Lượt làm bài hoàn thành</span>
               <div className="text-3xl font-black text-slate-900 mt-1">
-                {analytics?.totalAttempts ?? 0}
+                {loadingAnalytics ? (
+                  <span className="inline-block w-14 h-8 bg-slate-100 animate-pulse rounded-lg" />
+                ) : (
+                  analytics?.totalAttempts ?? 0
+                )}
               </div>
               <div className="text-[11px] font-semibold text-sky-600 mt-1">
-                {analytics?.totalAttempts
+                {loadingAnalytics
+                  ? 'Đang tính toán...'
+                  : analytics?.totalAttempts
                   ? `${analytics.totalAttempts} hoàn thành · ${analytics.inProgressAttempts ?? 27} đang làm (Tổng ${analytics.totalRecordedAttempts ?? 403})`
                   : 'Lưu trữ trên Firestore'}
               </div>
@@ -2540,20 +2589,34 @@ export const TeacherDashboard: React.FC = () => {
             <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
               <span className="text-xs font-bold text-slate-400 uppercase">Đúng lần đầu (TB)</span>
               <div className="text-2xl sm:text-3xl font-black text-emerald-600 mt-1">
-                {hasAttempts ? `${analytics?.avgFirstTryAccuracy}% (${analytics?.avgFirstTryScore ?? Number(((analytics?.avgFirstTryAccuracy || 0) / 10).toFixed(1))}/10)` : '—'}
+                {loadingAnalytics ? (
+                  <span className="inline-block w-20 h-8 bg-slate-100 animate-pulse rounded-lg" />
+                ) : hasAttempts ? (
+                  `${analytics?.avgFirstTryAccuracy}% (${analytics?.avgFirstTryScore ?? Number(((analytics?.avgFirstTryAccuracy || 0) / 10).toFixed(1))}/10)`
+                ) : (
+                  '—'
+                )}
               </div>
               <div className="text-[11px] font-semibold text-slate-500 mt-1">
-                {hasAttempts ? 'Điểm luyện tập chính (Thang 10)' : 'Chưa có lượt làm bài'}
+                {loadingAnalytics ? 'Đang phân tích...' : hasAttempts ? 'Điểm luyện tập chính (Thang 10)' : 'Chưa có lượt làm bài'}
               </div>
             </div>
 
             <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
               <span className="text-xs font-bold text-slate-400 uppercase">Đúng sau gợi ý (TB)</span>
               <div className="text-2xl sm:text-3xl font-black text-primary-600 mt-1">
-                {hasAttempts ? `${analytics?.avgFinalAccuracy}% (${analytics?.avgFinalScore ?? Number(((analytics?.avgFinalAccuracy || 0) / 10).toFixed(1))}/10)` : '—'}
+                {loadingAnalytics ? (
+                  <span className="inline-block w-20 h-8 bg-slate-100 animate-pulse rounded-lg" />
+                ) : hasAttempts ? (
+                  `${analytics?.avgFinalAccuracy}% (${analytics?.avgFinalScore ?? Number(((analytics?.avgFinalAccuracy || 0) / 10).toFixed(1))}/10)`
+                ) : (
+                  '—'
+                )}
               </div>
               <div className="text-[11px] font-semibold text-emerald-600 mt-1">
-                {hasAttempts
+                {loadingAnalytics
+                  ? 'Đang tính độ tiến bộ...'
+                  : hasAttempts
                   ? `+${Math.max(0, (analytics?.avgFinalAccuracy || 0) - (analytics?.avgFirstTryAccuracy || 0))}% pp tiến bộ`
                   : 'Chưa có lượt làm bài'}
               </div>
@@ -2572,11 +2635,60 @@ export const TeacherDashboard: React.FC = () => {
                 </p>
               </div>
               <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 self-start sm:self-auto">
-                {hasAttempts ? 'Thống kê thực từ Firestore' : 'Chờ dữ liệu'}
+                {loadingAnalytics ? 'Đang tải dữ liệu...' : hasAttempts ? 'Thống kê thực từ Firestore' : 'Chờ dữ liệu'}
               </span>
             </div>
 
-            {hasAttempts && chartData.length > 0 ? (
+            {loadingAnalytics ? (
+              <div className="space-y-4 py-4">
+                <div className="flex items-center justify-between text-xs text-slate-400">
+                  <span className="flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" />
+                    <span className="font-medium text-slate-600">Đang tổng hợp 5 năng lực đọc hiểu từ Cloud Firestore...</span>
+                  </span>
+                  <span className="text-[11px] bg-slate-100 px-2.5 py-1 rounded-full font-semibold">Dữ liệu phân tích</span>
+                </div>
+                <div className="h-64 w-full flex items-end justify-between gap-4 px-6 pt-8 pb-4 bg-slate-50/70 border border-slate-100 rounded-2xl">
+                  {[
+                    { label: 'Thông tin trực tiếp', h1: 'h-36', h2: 'h-44' },
+                    { label: 'Từ trong ngữ cảnh', h1: 'h-28', h2: 'h-36' },
+                    { label: 'Nội dung chính', h1: 'h-20', h2: 'h-32' },
+                    { label: 'Sắp xếp trình tự', h1: 'h-32', h2: 'h-40' },
+                    { label: 'Liên hệ vận dụng', h1: 'h-24', h2: 'h-36' }
+                  ].map((item, idx) => (
+                    <div key={idx} className="flex-1 flex flex-col items-center gap-2">
+                      <div className="w-full flex items-end justify-center gap-1.5 h-44">
+                        <div className={`w-1/2 ${item.h1} bg-sky-200/70 animate-pulse rounded-t-md`} />
+                        <div className={`w-1/2 ${item.h2} bg-emerald-200/70 animate-pulse rounded-t-md`} />
+                      </div>
+                      <div className="h-3 w-16 bg-slate-200 animate-pulse rounded" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : analyticsError ? (
+              <div className="py-10 px-4 text-center rounded-2xl bg-rose-50/60 border border-rose-200 flex flex-col items-center">
+                <AlertCircle className="w-8 h-8 text-rose-500 mb-2" />
+                <p className="text-sm font-bold text-rose-800">{analyticsError}</p>
+                <button
+                  onClick={() => {
+                    setLoadingAnalytics(true);
+                    setAnalyticsError(null);
+                    const getAnalytics = httpsCallable(functions, 'getTeacherAnalytics');
+                    getAnalytics({})
+                      .then((r: any) => {
+                        if (r?.data) setAnalytics(r.data);
+                      })
+                      .catch((e: any) => setAnalyticsError(e.message || 'Lỗi tải thống kê.'))
+                      .finally(() => setLoadingAnalytics(false));
+                  }}
+                  className="mt-3 px-4 py-2 bg-white border border-rose-300 text-rose-700 text-xs font-bold rounded-xl shadow-sm hover:bg-rose-100 transition active:scale-95 flex items-center gap-1.5"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Tải lại thống kê</span>
+                </button>
+              </div>
+            ) : hasAttempts && chartData.length > 0 ? (
               <div className="space-y-3">
                 <div className="h-72 w-full">
                   <ResponsiveContainer width="100%" height="100%">
@@ -2639,7 +2751,16 @@ export const TeacherDashboard: React.FC = () => {
               Mẫu ghép cặp học sinh hoàn thành cả bài kiểm tra đầu kỳ (Pre-test) và cuối kỳ (Post-test) để đo lường mức tăng điểm phần trăm thực tế.
             </p>
 
-            {analytics?.pairedPrePostStats && analytics.pairedPrePostStats.pairedCount > 0 ? (
+            {loadingAnalytics ? (
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 animate-pulse">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="bg-white p-4 rounded-2xl shadow-sm border border-indigo-100 h-24 flex flex-col justify-center">
+                    <div className="h-3 w-24 bg-slate-200 rounded mb-2" />
+                    <div className="h-6 w-16 bg-slate-200 rounded" />
+                  </div>
+                ))}
+              </div>
+            ) : analytics?.pairedPrePostStats && analytics.pairedPrePostStats.pairedCount > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-center">
                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-indigo-100">
                   <span className="text-xs font-bold text-slate-400">Số mẫu ghép cặp (N)</span>
@@ -6683,7 +6804,18 @@ export const TeacherDashboard: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      setPreviewModalLesson(draftLesson);
+                      const preparedDraft = {
+                        ...draftLesson,
+                        questions: (draftLesson.questions || []).map((q: any) => {
+                          const ans = q.correctAnswer !== undefined ? q.correctAnswer : q.answer;
+                          return {
+                            ...q,
+                            correctAnswer: ans,
+                            answer: ans
+                          };
+                        })
+                      };
+                      setPreviewModalLesson(preparedDraft);
                       setPreviewQuestionIdx(0);
                       setPreviewUserAnswers({});
                       setPreviewShowHint({});
@@ -10979,145 +11111,262 @@ export const TeacherDashboard: React.FC = () => {
                     </div>
 
                     {/* Question Prompt */}
+                    {/* Question Prompt */}
                     <h4 className="text-base font-black text-slate-900 leading-snug">
-                      {currQ.prompt}
+                      {currQ.prompt || currQ.statement || 'Đọc kỹ câu hỏi và chọn câu trả lời đúng:'}
                     </h4>
 
-                    {/* Multiple Choice interactive preview */}
-                    {currQ.type === 'multiple_choice' && currQ.options && (
-                      <div className="space-y-2 pt-1">
-                        {currQ.options.map((opt: string, oIdx: number) => {
-                          const optChar = String.fromCharCode(65 + oIdx);
-                          const isSelected = previewUserAnswers[currQ.id] === optChar;
-                          const isCorrect = currQ.correctAnswer === optChar;
-                          const hasAnswered = Boolean(previewUserAnswers[currQ.id]);
+                    {/* Determine canonical correct answer for currQ */}
+                    {(() => {
+                      const targetCorrect = currQ.correctAnswer !== undefined ? currQ.correctAnswer : currQ.answer;
 
-                          return (
-                            <button
-                              key={oIdx}
-                              type="button"
-                              onClick={() => setPreviewUserAnswers({ ...previewUserAnswers, [currQ.id]: optChar })}
-                              className={`w-full text-left p-3 rounded-xl border text-xs sm:text-sm font-bold flex items-center gap-3 transition cursor-pointer ${
-                                isSelected
-                                  ? isCorrect
-                                    ? 'bg-emerald-50 border-emerald-400 text-emerald-950 ring-2 ring-emerald-300'
-                                    : 'bg-rose-50 border-rose-400 text-rose-950 ring-2 ring-rose-300'
-                                  : hasAnswered && isCorrect
-                                  ? 'bg-emerald-50/60 border-emerald-300 text-emerald-900'
-                                  : 'bg-slate-50 border-slate-200 text-slate-800 hover:bg-slate-100'
-                              }`}
-                            >
-                              <span className={`w-6 h-6 rounded-full flex items-center justify-center font-black text-xs shrink-0 ${
-                                isSelected ? 'bg-white shadow-sm' : 'bg-slate-200 text-slate-700'
-                              }`}>
-                                {optChar}
-                              </span>
-                              <span className="flex-1">{opt}</span>
-                              {isSelected && (
-                                <span className="text-[11px] font-black px-2 py-0.5 rounded-full shrink-0">
-                                  {isCorrect ? '✓ Đúng' : '✗ Chưa đúng'}
-                                </span>
+                      return (
+                        <>
+                          {/* 1. Multiple Choice interactive preview */}
+                          {currQ.type === 'multiple_choice' && currQ.options && (
+                            <div className="space-y-2 pt-1">
+                              {currQ.options.map((opt: string, oIdx: number) => {
+                                const optChar = String.fromCharCode(65 + oIdx);
+                                const cleanOpt = cleanOptionText(opt);
+                                const isSelected = previewUserAnswers[currQ.id] === optChar;
+                                const isCorrect = checkAnswerCorrectness(optChar, targetCorrect, {
+                                  type: 'multiple_choice',
+                                  options: currQ.options
+                                });
+                                const hasAnswered = Boolean(previewUserAnswers[currQ.id]);
+
+                                return (
+                                  <button
+                                    key={oIdx}
+                                    type="button"
+                                    onClick={() => {
+                                      setPreviewUserAnswers({ ...previewUserAnswers, [currQ.id]: optChar });
+                                      if (!isCorrect) {
+                                        setPreviewShowHint({ ...previewShowHint, [currQ.id]: true });
+                                      }
+                                    }}
+                                    className={`w-full text-left p-3 rounded-xl border text-xs sm:text-sm font-bold flex items-center gap-3 transition cursor-pointer ${
+                                      isSelected
+                                        ? isCorrect
+                                          ? 'bg-emerald-50 border-emerald-400 text-emerald-950 ring-2 ring-emerald-300'
+                                          : 'bg-rose-50 border-rose-400 text-rose-950 ring-2 ring-rose-300'
+                                        : hasAnswered && isCorrect
+                                        ? 'bg-emerald-50/60 border-emerald-300 text-emerald-900'
+                                        : 'bg-slate-50 border-slate-200 text-slate-800 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    <span className={`w-6 h-6 rounded-full flex items-center justify-center font-black text-xs shrink-0 ${
+                                      isSelected ? 'bg-white shadow-sm' : 'bg-slate-200 text-slate-700'
+                                    }`}>
+                                      {optChar}
+                                    </span>
+                                    <span className="flex-1">{cleanOpt}</span>
+                                    {isSelected && (
+                                      <span className={`text-[11px] font-black px-2 py-0.5 rounded-full shrink-0 ${
+                                        isCorrect ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                                      }`}>
+                                        {isCorrect ? '✓ Đúng' : '✗ Chưa đúng'}
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* 2. True / False interactive preview */}
+                          {currQ.type === 'true_false' && (
+                            <div className="space-y-3 pt-1">
+                              {currQ.statement && currQ.statement !== currQ.prompt && (
+                                <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-xs sm:text-sm font-bold text-slate-800 text-center">
+                                  "{currQ.statement}"
+                                </div>
                               )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+                              <div className="flex gap-3">
+                                {[
+                                  { label: 'Đúng (True)', val: true },
+                                  { label: 'Sai (False)', val: false }
+                                ].map((item) => {
+                                  const isSelected = previewUserAnswers[currQ.id] === item.val;
+                                  const isCorrect = checkAnswerCorrectness(item.val, targetCorrect, {
+                                    type: 'true_false'
+                                  });
+                                  const hasAnswered = previewUserAnswers[currQ.id] !== undefined;
 
-                    {/* True / False interactive preview */}
-                    {currQ.type === 'true_false' && (
-                      <div className="flex gap-3 pt-1">
-                        {[
-                          { label: 'Đúng (True)', val: true },
-                          { label: 'Sai (False)', val: false }
-                        ].map((item) => {
-                          const isSelected = previewUserAnswers[currQ.id] === item.val;
-                          const isCorrect = currQ.correctAnswer === item.val;
+                                  return (
+                                    <button
+                                      key={String(item.val)}
+                                      type="button"
+                                      onClick={() => {
+                                        setPreviewUserAnswers({ ...previewUserAnswers, [currQ.id]: item.val });
+                                        if (!isCorrect) {
+                                          setPreviewShowHint({ ...previewShowHint, [currQ.id]: true });
+                                        }
+                                      }}
+                                      className={`flex-1 p-3.5 rounded-xl border font-black text-xs sm:text-sm transition cursor-pointer text-center ${
+                                        isSelected
+                                          ? isCorrect
+                                            ? 'bg-emerald-50 border-emerald-500 text-emerald-900 ring-2 ring-emerald-300'
+                                            : 'bg-rose-50 border-rose-500 text-rose-900 ring-2 ring-rose-300'
+                                          : hasAnswered && isCorrect
+                                          ? 'bg-emerald-50/60 border-emerald-300 text-emerald-900'
+                                          : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      {item.label}
+                                      {isSelected && (
+                                        <span className={`block text-[11px] font-bold mt-1 ${isCorrect ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                          {isCorrect ? '✓ Đúng' : '✗ Chưa đúng'}
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
 
-                          return (
+                          {/* 3. Sequence interactive preview */}
+                          {currQ.type === 'sequence' && (() => {
+                            const seqItems: string[] = (
+                              previewUserAnswers[currQ.id] ||
+                              (currQ.items && currQ.items.length > 0
+                                ? currQ.items
+                                : Array.isArray(currQ.answer) && typeof currQ.answer[0] === 'string'
+                                ? currQ.answer
+                                : ['Sự việc 1', 'Sự việc 2', 'Sự việc 3'])
+                            ).map((it: any) => cleanOptionText(String(it)));
+
+                            const isCorrect = checkAnswerCorrectness(seqItems, targetCorrect, {
+                              type: 'sequence',
+                              items: currQ.items || currQ.answer
+                            });
+                            const hasChecked = Boolean(previewUserAnswers[currQ.id]);
+
+                            const moveItem = (fromIdx: number, toIdx: number) => {
+                              const newItems = [...seqItems];
+                              const [moved] = newItems.splice(fromIdx, 1);
+                              newItems.splice(toIdx, 0, moved);
+                              setPreviewUserAnswers({ ...previewUserAnswers, [currQ.id]: newItems });
+                            };
+
+                            return (
+                              <div className="space-y-2 pt-1">
+                                <div className="flex items-center justify-between pb-1">
+                                  <span className="text-xs font-bold text-slate-600 block">
+                                    Dùng nút ▲ / ▼ để sắp xếp trình tự các sự việc:
+                                  </span>
+                                  {hasChecked && (
+                                    <span className={`text-xs font-black px-2.5 py-0.5 rounded-full ${
+                                      isCorrect ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                                    }`}>
+                                      {isCorrect ? '✓ Thứ tự chính xác' : '✗ Thứ tự chưa đúng'}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {seqItems.map((step: string, sIdx: number) => (
+                                  <div
+                                    key={sIdx}
+                                    className="p-3 bg-slate-50 hover:bg-slate-100/80 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 flex items-center gap-3 transition"
+                                  >
+                                    <span className="w-6 h-6 rounded-full bg-amber-500 text-white text-xs font-black flex items-center justify-center shrink-0">
+                                      {sIdx + 1}
+                                    </span>
+                                    <span className="flex-1">{step}</span>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        disabled={sIdx === 0}
+                                        onClick={() => moveItem(sIdx, sIdx - 1)}
+                                        className="p-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 hover:bg-sky-50 hover:text-sky-600 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                                        title="Chuyển lên"
+                                      >
+                                        ▲
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={sIdx === seqItems.length - 1}
+                                        onClick={() => moveItem(sIdx, sIdx + 1)}
+                                        className="p-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 hover:bg-sky-50 hover:text-sky-600 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                                        title="Chuyển xuống"
+                                      >
+                                        ▼
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+
+                                <div className="pt-2 flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setPreviewUserAnswers({ ...previewUserAnswers, [currQ.id]: seqItems });
+                                      if (!isCorrect) {
+                                        setPreviewShowHint({ ...previewShowHint, [currQ.id]: true });
+                                      }
+                                    }}
+                                    className="px-4 py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-xl shadow-sm transition cursor-pointer"
+                                  >
+                                    Kiểm tra thứ tự
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Pedagogical Hint & Explanation Feedback */}
+                          <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                             <button
-                              key={String(item.val)}
                               type="button"
-                              onClick={() => setPreviewUserAnswers({ ...previewUserAnswers, [currQ.id]: item.val })}
-                              className={`flex-1 p-3.5 rounded-xl border font-black text-xs sm:text-sm transition cursor-pointer text-center ${
-                                isSelected
-                                  ? isCorrect
-                                    ? 'bg-emerald-50 border-emerald-500 text-emerald-900 ring-2 ring-emerald-300'
-                                    : 'bg-rose-50 border-rose-500 text-rose-900 ring-2 ring-rose-300'
-                                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                              }`}
+                              onClick={() => setPreviewShowHint({
+                                ...previewShowHint,
+                                [currQ.id]: !previewShowHint[currQ.id]
+                              })}
+                              className="text-xs font-bold text-amber-800 hover:text-amber-950 flex items-center gap-1.5 cursor-pointer underline decoration-amber-400"
                             >
-                              {item.label}
+                              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                              <span>{previewShowHint[currQ.id] ? 'Ẩn gợi ý sư phạm' : 'Xem gợi ý sư phạm (học sinh nhận khi làm sai lần 1)'}</span>
                             </button>
-                          );
-                        })}
-                      </div>
-                    )}
 
-                    {/* Sequence interactive preview */}
-                    {currQ.type === 'sequence' && (
-                      <div className="space-y-2 pt-1">
-                        <span className="text-xs font-bold text-slate-600 block">Thứ tự đúng của câu chuyện:</span>
-                        {(currQ.items || currQ.answer || []).map((step: string, sIdx: number) => (
-                          <div key={sIdx} className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-full bg-amber-500 text-white text-[11px] font-black flex items-center justify-center shrink-0">
-                              {sIdx + 1}
-                            </span>
-                            <span>{step}</span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={previewQuestionIdx === 0}
+                                onClick={() => setPreviewQuestionIdx(previewQuestionIdx - 1)}
+                                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl disabled:opacity-30 cursor-pointer"
+                              >
+                                Câu trước
+                              </button>
+                              <button
+                                type="button"
+                                disabled={previewQuestionIdx === totalQ - 1}
+                                onClick={() => setPreviewQuestionIdx(previewQuestionIdx + 1)}
+                                className="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl disabled:opacity-30 cursor-pointer"
+                              >
+                                Câu tiếp theo
+                              </button>
+                            </div>
                           </div>
-                        ))}
-                      </div>
-                    )}
 
-                    {/* Pedagogical Hint & Explanation Feedback */}
-                    <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setPreviewShowHint({
-                          ...previewShowHint,
-                          [currQ.id]: !previewShowHint[currQ.id]
-                        })}
-                        className="text-xs font-bold text-amber-800 hover:text-amber-950 flex items-center gap-1.5 cursor-pointer underline decoration-amber-400"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                        <span>{previewShowHint[currQ.id] ? 'Ẩn gợi ý sư phạm' : 'Xem gợi ý sư phạm (học sinh nhận khi trả lời sai)'}</span>
-                      </button>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          disabled={previewQuestionIdx === 0}
-                          onClick={() => setPreviewQuestionIdx(previewQuestionIdx - 1)}
-                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl disabled:opacity-30 cursor-pointer"
-                        >
-                          Câu trước
-                        </button>
-                        <button
-                          type="button"
-                          disabled={previewQuestionIdx === totalQ - 1}
-                          onClick={() => setPreviewQuestionIdx(previewQuestionIdx + 1)}
-                          className="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl disabled:opacity-30 cursor-pointer"
-                        >
-                          Câu tiếp theo
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Display Pedagogical Hint Box if toggled */}
-                    {previewShowHint[currQ.id] && (
-                      <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-1.5 text-xs text-amber-950 animate-fade-in">
-                        <div className="font-bold flex items-center gap-1.5 text-amber-900">
-                          <Sparkles className="w-4 h-4 text-amber-600" />
-                          <span>Gợi ý sư phạm:</span>
-                        </div>
-                        <p className="font-medium pl-5">{currQ.hint || 'Đọc lại đoạn văn để tìm chi tiết nhé.'}</p>
-                        {currQ.explanation && (
-                          <div className="pt-1.5 border-t border-amber-200/60 pl-5 text-[11px] text-slate-600">
-                            <strong>Giải thích máy chủ:</strong> {currQ.explanation}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                          {/* Display Pedagogical Hint Box if toggled */}
+                          {previewShowHint[currQ.id] && (
+                            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-2 text-xs text-amber-950 animate-fade-in">
+                              <div className="font-bold flex items-center gap-1.5 text-amber-900">
+                                <Sparkles className="w-4 h-4 text-amber-600" />
+                                <span>Gợi ý sư phạm (cho học sinh thử lại lần 2):</span>
+                              </div>
+                              <p className="font-medium pl-5">{currQ.hint || 'Em hãy đọc lại đoạn văn để tìm chi tiết nhé.'}</p>
+                              {currQ.explanation && (
+                                <div className="pt-2 border-t border-amber-200/60 pl-5 text-[11px] text-slate-600">
+                                  <strong>Giải thích chi tiết của máy chủ:</strong> {currQ.explanation}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

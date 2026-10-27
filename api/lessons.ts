@@ -18,6 +18,7 @@
 import { getDb } from './_helpers/firebaseAdmin.js';
 import { handleApiError, requireTeacher, requireTeacherOrAdmin } from './_helpers/authMiddleware.js';
 import { ApiError, VercelApiRequest, VercelApiResponse } from './_helpers/types.js';
+import { sanitizeQuestionData, validateQuestionForPublish } from './_helpers/answerEvaluator.js';
 
 export default async function handler(req: VercelApiRequest, res: VercelApiResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -136,28 +137,37 @@ async function handleGetTeacherLessons(req: VercelApiRequest, data: any) {
     lessonQuery = lessonQuery.where('semester', '==', Number(semester));
   }
 
-  const snap = await lessonQuery.get();
-  const lessons: any[] = [];
+  const [snap, allAssignSnap] = await Promise.all([
+    lessonQuery.get(),
+    db.collection('assignments')
+      .where('teacherUid', '==', teacherUid)
+      .where('status', '==', 'active')
+      .get()
+  ]);
 
+  // Group active assignments by lessonId in memory (replaces N+1 sequential Firestore queries)
+  const assignmentsByLesson = new Map<string, any[]>();
+  allAssignSnap.docs.forEach((ad) => {
+    const aData = ad.data();
+    const lId = aData.lessonId;
+    if (!lId) return;
+    const list = assignmentsByLesson.get(lId) || [];
+    list.push({
+      assignmentId: ad.id,
+      classId: aData.classId,
+      roundName: aData.roundName || 'Đợt 1',
+      lessonVersionId: aData.lessonVersionId
+    });
+    assignmentsByLesson.set(lId, list);
+  });
+
+  const lessons: any[] = [];
   for (const doc of snap.docs) {
     const lData = doc.data();
-
-    const assignSnap = await db
-      .collection('assignments')
-      .where('lessonId', '==', doc.id)
-      .where('status', '==', 'active')
-      .get();
-
-    const assignedClasses = assignSnap.docs.map((ad) => ({
-      assignmentId: ad.id,
-      classId: ad.data().classId,
-      roundName: ad.data().roundName || 'Đợt 1',
-      lessonVersionId: ad.data().lessonVersionId
-    }));
-
+    const assignedClasses = assignmentsByLesson.get(doc.id) || [];
     lessons.push({
       ...lData,
-      assignedClassCount: assignSnap.size,
+      assignedClassCount: assignedClasses.length,
       assignedClasses
     });
   }
@@ -334,7 +344,7 @@ async function handleSaveLessonDraft(req: VercelApiRequest, data: any) {
     genre: draft.genre || 'narrative',
     passage: String(draft.passage).trim(),
     vocabulary: Array.isArray(draft.vocabulary) ? draft.vocabulary : [],
-    questions: Array.isArray(draft.questions) ? draft.questions : [],
+    questions: Array.isArray(draft.questions) ? draft.questions.map((q: any, idx: number) => sanitizeQuestionData(q, idx)) : [],
     audioUrl: draft.audioUrl || undefined,
     audioMetadata: draft.audioMetadata || undefined
   };
@@ -396,21 +406,35 @@ async function handlePublishLesson(req: VercelApiRequest, data: any) {
   const privateAnswers: Record<string, any> = {};
 
   const questions = Array.isArray(rawDraft.questions) ? rawDraft.questions : [];
-  questions.forEach((q: any, idx: number) => {
+  questions.forEach((rawQ: any, idx: number) => {
+    const q = sanitizeQuestionData(rawQ, idx);
     const qId = q.id || `q${idx + 1}`;
+
+    // Gate 2: Pre-publish validation check
+    const validation = validateQuestionForPublish(q, idx);
+    if (!validation.valid) {
+      throw new ApiError(400, 'invalid-argument', `Không thể xuất bản bài đọc vì: ${validation.errors.join('; ')}`);
+    }
+
     publicQuestions.push({
       id: qId,
       type: q.type || 'multiple_choice',
       prompt: q.prompt,
-      options: q.options || [],
+      statement: q.statement || undefined,
+      options: q.options || undefined,
+      items: q.items || undefined,
       difficulty: q.difficulty || 'medium',
-      skillTag: q.skillTag || 'general'
+      skillTag: q.skillTag || 'general',
+      relatedPassagePart: q.relatedPassagePart || undefined
     });
 
     privateAnswers[qId] = {
       correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : q.answer,
       hint: q.hint || '',
-      explanation: q.explanation || ''
+      explanation: q.explanation || '',
+      type: q.type,
+      options: q.options || undefined,
+      items: q.items || undefined
     };
   });
 
@@ -654,7 +678,11 @@ async function handleAssignLesson(req: VercelApiRequest, data: any) {
   };
 }
 
-// Helper: execute candidate ping across supported Gemini models
+// In-memory cache for AI status to prevent blocking every page load with external network ping
+let cachedAIStatus: { result: any; timestamp: number } | null = null;
+const AI_STATUS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Helper: execute candidate ping across supported Gemini models with timeout
 async function executeGeminiPing(apiKey: string): Promise<{
   ok: boolean;
   status: number;
@@ -665,8 +693,8 @@ async function executeGeminiPing(apiKey: string): Promise<{
 }> {
   const candidateModels = [
     process.env.GEMINI_MODEL,
-    'gemini-3.5-flash-lite',
-    'gemini-3.8-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
     'gemini-2.5-flash'
   ].filter(Boolean) as string[];
 
@@ -675,6 +703,9 @@ async function executeGeminiPing(apiKey: string): Promise<{
 
   for (const model of candidateModels) {
     const startTime = Date.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+
     try {
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -684,9 +715,11 @@ async function executeGeminiPing(apiKey: string): Promise<{
           body: JSON.stringify({
             contents: [{ role: 'user', parts: [{ text: 'Ping' }] }],
             generationConfig: { maxOutputTokens: 2 }
-          })
+          }),
+          signal: controller.signal
         }
       );
+      clearTimeout(timeoutId);
       const latencyMs = Date.now() - startTime;
       if (response.ok) {
         return { ok: true, status: response.status, latencyMs, activeModel: model };
@@ -698,7 +731,12 @@ async function executeGeminiPing(apiKey: string): Promise<{
         break;
       }
     } catch (e: any) {
+      clearTimeout(timeoutId);
       lastRawError = e.message;
+      if (e.name === 'AbortError') {
+        lastStatus = 408;
+        break;
+      }
     }
   }
 
@@ -706,6 +744,7 @@ async function executeGeminiPing(apiKey: string): Promise<{
   if (lastStatus === 400) errorDesc = 'Khóa API không hợp lệ (API_KEY_INVALID)';
   else if (lastStatus === 403) errorDesc = 'Khóa API bị hạn chế quyền hoặc chưa bật API (PERMISSION_DENIED)';
   else if (lastStatus === 404) errorDesc = 'Mô hình Gemini không tìm thấy (MODEL_NOT_FOUND)';
+  else if (lastStatus === 408) errorDesc = 'Kiểm tra kết nối AI quá thời gian (TIMEOUT)';
   else if (lastStatus === 429) errorDesc = 'Hết hạn ngạch hoặc bị giới hạn tốc độ (QUOTA_EXCEEDED)';
 
   return {
@@ -820,6 +859,11 @@ Trả về duy nhất định dạng JSON thuần dạng:
     throw new ApiError(500, 'internal', 'Không thể phân tích định dạng JSON từ Gemini AI.');
   }
 
+  // Canonicalize & sanitize all questions generated by AI
+  if (draft && Array.isArray(draft.questions)) {
+    draft.questions = draft.questions.map((q: any, idx: number) => sanitizeQuestionData(q, idx));
+  }
+
   return {
     success: true,
     draft,
@@ -838,8 +882,8 @@ async function handleGetAIStatus() {
       connected: false,
       status: 'NOT_CONFIGURED',
       provider: 'Offline / Manual Mode',
-      model: 'gemini-3.5-flash-lite',
-      activeModel: 'gemini-3.5-flash-lite',
+      model: 'gemini-2.0-flash',
+      activeModel: 'gemini-2.0-flash',
       supportedFeatures: {
         lessonGeneration: false,
         remediationSuggestion: false,
@@ -848,12 +892,17 @@ async function handleGetAIStatus() {
     };
   }
 
+  // Return cached verification result if valid within 5 minutes
+  if (cachedAIStatus && (Date.now() - cachedAIStatus.timestamp < AI_STATUS_CACHE_TTL_MS)) {
+    return cachedAIStatus.result;
+  }
+
   // Quick verification ping using candidate models
   try {
     const pingResult = await executeGeminiPing(apiKey);
 
     if (pingResult.ok) {
-      return {
+      const res = {
         success: true,
         connected: true,
         status: 'VERIFIED',
@@ -867,8 +916,10 @@ async function handleGetAIStatus() {
           questionGeneration: true
         }
       };
+      cachedAIStatus = { result: res, timestamp: Date.now() };
+      return res;
     } else {
-      return {
+      const res = {
         success: true,
         connected: true,
         status: 'UNAVAILABLE',
@@ -883,14 +934,17 @@ async function handleGetAIStatus() {
           questionGeneration: false
         }
       };
+      // Cache failure for 1 minute so serverless doesn't hammer endpoint
+      cachedAIStatus = { result: res, timestamp: Date.now() - (AI_STATUS_CACHE_TTL_MS - 60000) };
+      return res;
     }
   } catch (err: any) {
-    return {
+    const res = {
       success: true,
       connected: true,
       status: 'READY_UNVERIFIED',
-      activeModel: 'gemini-3.5-flash-lite',
-      model: 'gemini-3.5-flash-lite',
+      activeModel: 'gemini-2.0-flash',
+      model: 'gemini-2.0-flash',
       provider: 'Google Gemini AI',
       message: `Đã nhận diện khóa API trong backend nhưng chưa kiểm chứng với cuộc gọi thật: ${err.message}`,
       supportedFeatures: {
@@ -899,6 +953,8 @@ async function handleGetAIStatus() {
         questionGeneration: true
       }
     };
+    cachedAIStatus = { result: res, timestamp: Date.now() };
+    return res;
   }
 }
 

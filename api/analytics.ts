@@ -174,11 +174,30 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
   }
 }
 
+// In-memory cache for teacher analytics to prevent repetitive heavy calculations on rapid navigation
+const teacherAnalyticsCache = new Map<string, { result: any; timestamp: number }>();
+const TEACHER_ANALYTICS_CACHE_TTL_MS = 45 * 1000; // 45 seconds
+
+// Helper to chunk array for bounded concurrency
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
 // 1. GET TEACHER ANALYTICS
 async function handleGetTeacherAnalytics(req: VercelApiRequest, data: any) {
   const { uid: teacherUid } = await requireTeacher(req);
   const { classId, assignmentId, academicYear, grade } = data || {};
   const db = getDb();
+
+  const cacheKey = `${teacherUid}_${classId || 'all'}_${assignmentId || 'all'}_${academicYear || 'all'}_${grade || 'all'}`;
+  const cached = teacherAnalyticsCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < TEACHER_ANALYTICS_CACHE_TTL_MS) {
+    return cached.result;
+  }
 
   const rawClassDocs = await db.collection('classes').where('teacherUid', '==', teacherUid).get();
   const classDocs = rawClassDocs.docs.filter((d) => {
@@ -215,15 +234,40 @@ async function handleGetTeacherAnalytics(req: VercelApiRequest, data: any) {
     };
   }
 
-  // Count total students across classes
+  // Count total students across classes using class metadata or parallel aggregation
   let totalStudents = 0;
-  for (const cId of classIds) {
-    const sSnap = await db.collection('students').where('classId', '==', cId).get();
-    totalStudents += sSnap.size;
+  let missingStudentCount = false;
+  classDocs.forEach((d) => {
+    const count = d.data().studentCount;
+    if (typeof count === 'number') {
+      totalStudents += count;
+    } else {
+      missingStudentCount = true;
+    }
+  });
+
+  if (missingStudentCount || (totalStudents === 0 && classIds.size > 0)) {
+    const countSnaps = await Promise.all(
+      Array.from(classIds).map((cId) =>
+        db.collection('students').where('classId', '==', cId).count().get()
+      )
+    );
+    totalStudents = countSnaps.reduce((sum, s) => sum + s.data().count, 0);
   }
 
-  // Query assignments
-  const rawAssignDocs = await db.collection('assignments').where('teacherUid', '==', teacherUid).get();
+  // Query assignments and attempts filtered STRICTLY by teacherUid in parallel
+  const [rawAssignDocs, rawTeacherAttemptsSnap, teacherAllAttemptsCountSnap] = await Promise.all([
+    db.collection('assignments').where('teacherUid', '==', teacherUid).get(),
+    db.collection('attempts')
+      .where('teacherUid', '==', teacherUid)
+      .where('status', '==', 'completed')
+      .get(),
+    db.collection('attempts')
+      .where('teacherUid', '==', teacherUid)
+      .count()
+      .get()
+  ]);
+
   const assignMap: Record<string, any> = {};
   rawAssignDocs.docs.forEach((d) => (assignMap[d.id] = { id: d.id, ...d.data() }));
 
@@ -234,20 +278,18 @@ async function handleGetTeacherAnalytics(req: VercelApiRequest, data: any) {
     return true;
   });
 
-  // Query all attempts in the DB to determine total recorded attempts vs completed
-  const allAttemptsSnap = await db.collection('attempts').get();
-  const totalRecordedAttempts = allAttemptsSnap.size;
+  let rawAttemptsSnap = rawTeacherAttemptsSnap;
+  let totalRecordedAttempts = teacherAllAttemptsCountSnap.data().count;
 
-  // Query completed attempts: query by teacherUid or fallback to all attempts
-  let rawAttemptsSnap = await db
-    .collection('attempts')
-    .where('teacherUid', '==', teacherUid)
-    .where('status', '==', 'completed')
-    .get();
-
-  // If none found with teacherUid, fallback query by status completed
-  if (rawAttemptsSnap.empty) {
-    rawAttemptsSnap = await db.collection('attempts').where('status', '==', 'completed').get();
+  // Fallback for legacy attempts without teacherUid
+  if (rawAttemptsSnap.empty && assignDocs.length > 0) {
+    const targetAssignIds = assignDocs.map((d) => d.id).slice(0, 30);
+    rawAttemptsSnap = await db
+      .collection('attempts')
+      .where('assignmentId', 'in', targetAssignIds)
+      .where('status', '==', 'completed')
+      .get();
+    totalRecordedAttempts = rawAttemptsSnap.size;
   }
 
   // Deduplicate attempts strictly by document ID
@@ -265,6 +307,14 @@ async function handleGetTeacherAnalytics(req: VercelApiRequest, data: any) {
   let totalFirstTry = 0;
   let totalFinal = 0;
   let totalQuestionsCount = 0;
+
+  // Compute 100% exact overall score counts directly from attempt documents
+  attemptsDocs.forEach((attDoc) => {
+    const att = attDoc.data();
+    totalFirstTry += att.firstTryCorrectCount || 0;
+    totalFinal += att.finalCorrectCount || 0;
+    totalQuestionsCount += att.totalQuestions || 5;
+  });
 
   const skillAccumulator: Record<
     string,
@@ -284,40 +334,46 @@ async function handleGetTeacherAnalytics(req: VercelApiRequest, data: any) {
     neededVersionIds.map(async (vId) => {
       const sampleAtt = attemptsDocs.find((d) => d.data().lessonVersionId === vId)?.data();
       if (!sampleAtt) return;
-      const vDoc = await db.collection('lessons').doc(sampleAtt.lessonId).collection('versions').doc(vId).get();
-      const vData = vDoc.data();
-      const map: Record<string, string> = {};
-      if (vData && vData.publicQuestions) {
-        vData.publicQuestions.forEach((q: any) => {
-          map[q.id] = q.skillTag || '';
-        });
-      }
-      versionSkillCache[vId] = map;
-    })
-  );
-
-  // Fetch responses for attempts
-  await Promise.all(
-    attemptsDocs.map(async (attDoc) => {
-      const att = attDoc.data();
-      totalFirstTry += att.firstTryCorrectCount || 0;
-      totalFinal += att.finalCorrectCount || 0;
-      totalQuestionsCount += att.totalQuestions || 5;
-
-      const qMap = versionSkillCache[att.lessonVersionId] || {};
-      const responsesSnap = await attDoc.ref.collection('responses').get();
-
-      responsesSnap.forEach((rDoc) => {
-        const r = rDoc.data();
-        const skill = qMap[r.questionId] || r.skillTag;
-        if (skill && skillAccumulator[skill]) {
-          skillAccumulator[skill].tested++;
-          if (r.firstTryCorrect) skillAccumulator[skill].firstTryCorrect++;
-          if (r.finalCorrect) skillAccumulator[skill].finalCorrect++;
+      try {
+        const vDoc = await db.collection('lessons').doc(sampleAtt.lessonId).collection('versions').doc(vId).get();
+        const vData = vDoc.data();
+        const map: Record<string, string> = {};
+        if (vData && vData.publicQuestions) {
+          vData.publicQuestions.forEach((q: any) => {
+            map[q.id] = q.skillTag || '';
+          });
         }
-      });
+        versionSkillCache[vId] = map;
+      } catch {}
     })
   );
+
+  // Sample or chunk responses for skill breakdown (bounded to 40 recent attempts for fast sub-second analysis)
+  const targetResponseAttempts = attemptsDocs.length > 40
+    ? attemptsDocs.slice(0, 40)
+    : attemptsDocs;
+
+  const attemptChunks = chunkArray(targetResponseAttempts, 10);
+  for (const chunk of attemptChunks) {
+    await Promise.all(
+      chunk.map(async (attDoc) => {
+        const att = attDoc.data();
+        const qMap = versionSkillCache[att.lessonVersionId] || {};
+        try {
+          const responsesSnap = await attDoc.ref.collection('responses').get();
+          responsesSnap.forEach((rDoc) => {
+            const r = rDoc.data();
+            const skill = qMap[r.questionId] || r.skillTag;
+            if (skill && skillAccumulator[skill]) {
+              skillAccumulator[skill].tested++;
+              if (r.firstTryCorrect) skillAccumulator[skill].firstTryCorrect++;
+              if (r.finalCorrect) skillAccumulator[skill].finalCorrect++;
+            }
+          });
+        } catch {}
+      })
+    );
+  }
 
   const avgFirstTryAccuracy =
     totalQuestionsCount > 0 ? Math.round((totalFirstTry / totalQuestionsCount) * 100) : 0;
@@ -381,7 +437,7 @@ async function handleGetTeacherAnalytics(req: VercelApiRequest, data: any) {
     }
   }
 
-  return {
+  const result = {
     success: true,
     totalClasses: classIds.size,
     totalStudents,
@@ -398,6 +454,9 @@ async function handleGetTeacherAnalytics(req: VercelApiRequest, data: any) {
     skillBreakdown,
     prePostComparison
   };
+
+  teacherAnalyticsCache.set(cacheKey, { result, timestamp: Date.now() });
+  return result;
 }
 
 // 2. EXPORT TEACHER DATA (EXCEL, CSV UTF-8 BOM, JSON, PDF AUDIT REPORT)

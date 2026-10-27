@@ -4,7 +4,9 @@ import {
   SubmitAnswerResponse,
   SKILL_LABELS,
   DIFFICULTY_LABELS,
-  QUESTION_TYPE_LABELS
+  QUESTION_TYPE_LABELS,
+  cleanOptionText,
+  normalizeMcqAnswerToIndex
 } from '@emytv/shared';
 import {
   CheckCircle2,
@@ -17,7 +19,8 @@ import {
   Lightbulb,
   Send,
   ArrowRight,
-  Check
+  Check,
+  AlertTriangle
 } from 'lucide-react';
 import { playCorrectSound, playWrongSound } from '../utils/soundEffects';
 
@@ -36,6 +39,7 @@ interface QuestionCardProps {
   onNextQuestion: () => void;
   isLastQuestion: boolean;
   onFinishMission: () => void;
+  onSkipQuestion?: (questionId: string) => void;
 }
 
 export const QuestionCard: React.FC<QuestionCardProps> = ({
@@ -47,8 +51,14 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   existingResponse,
   onNextQuestion,
   isLastQuestion,
-  onFinishMission
+  onFinishMission,
+  onSkipQuestion
 }) => {
+  // Gate 3: Check if question is corrupted (e.g. sequence with no items or MCQ with no options)
+  const isCorrupted =
+    (question.type === 'sequence' && (!question.items || question.items.length < 2)) ||
+    (question.type === 'multiple_choice' && (!question.options || question.options.length < 2));
+
   // Current user selection
   const [selectedAnswer, setSelectedAnswer] = useState<any>(() => {
     if (existingResponse) {
@@ -216,8 +226,10 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
           <div className="grid grid-cols-1 gap-3 mb-6">
             {question.options.map((opt, i) => {
               const letter = String.fromCharCode(65 + i);
+              const cleanOpt = cleanOptionText(opt);
               const isSelected = selectedAnswer === letter;
-              const isCorrectAnswer = result?.correctAnswer === letter;
+              const correctIdx = result?.correctAnswer !== undefined ? normalizeMcqAnswerToIndex(result.correctAnswer, question.options) : null;
+              const isCorrectAnswer = correctIdx !== null ? correctIdx === i : result?.correctAnswer === letter;
 
               let buttonStyle = 'bg-white border-2 border-slate-200 text-slate-700 hover:border-sky-400 hover:bg-sky-50/50';
               let badgeStyle = 'bg-slate-100 text-slate-700';
@@ -229,10 +241,10 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
 
               if (isCompleted) {
                 if (isCorrectAnswer) {
-                  buttonStyle = 'bg-emerald-50 border-2 border-emerald-500 text-emerald-950 font-bold';
+                  buttonStyle = 'bg-emerald-50 border-emerald-500 text-emerald-950 font-bold';
                   badgeStyle = 'bg-emerald-500 text-white';
                 } else if (isSelected && !result?.correct) {
-                  buttonStyle = 'bg-rose-50 border-2 border-rose-400 text-rose-900 opacity-80';
+                  buttonStyle = 'bg-rose-50 border-rose-400 text-rose-900 opacity-80';
                   badgeStyle = 'bg-rose-500 text-white';
                 }
               }
@@ -251,7 +263,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                     {letter}
                   </span>
                   <span className="font-semibold text-base md:text-lg flex-1">
-                    {opt}
+                    {cleanOpt}
                   </span>
                   {isCompleted && isCorrectAnswer && (
                     <CheckCircle2 className="w-6 h-6 text-emerald-500 shrink-0" />
@@ -306,8 +318,29 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
           </div>
         )}
 
+        {/* Gate 3: Corrupted Question Safe Fallback (Missing sequence items or options) */}
+        {isCorrupted && (
+          <div className="p-4 md:p-5 bg-amber-50 border-2 border-amber-300 rounded-3xl mb-6 shadow-sm animate-fade-in">
+            <div className="flex items-center gap-2 text-amber-900 font-extrabold text-sm md:text-base mb-1.5">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+              <span>Nội dung câu hỏi đang được cập nhật</span>
+            </div>
+            <p className="text-xs md:text-sm text-amber-800 font-medium leading-relaxed mb-4">
+              Câu hỏi này đang được giáo viên cập nhật danh sách dữ liệu. Em hãy bấm nút <strong>"Bỏ qua câu này"</strong> bên dưới để tiếp tục bài làm mà không bị tính sai điểm nhé!
+            </p>
+            <button
+              type="button"
+              onClick={() => onSkipQuestion ? onSkipQuestion(question.id) : (isLastQuestion ? onFinishMission() : onNextQuestion())}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-black rounded-xl text-xs md:text-sm shadow transition cursor-pointer"
+            >
+              <span>Bỏ qua câu này (không trừ điểm)</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* 3. Sequence (3 Items Order) */}
-        {question.type === 'sequence' && Array.isArray(selectedAnswer) && (
+        {question.type === 'sequence' && !isCorrupted && Array.isArray(selectedAnswer) && (
           <div className="space-y-3 mb-6">
             <p className="text-xs md:text-sm font-semibold text-slate-500 italic">
               * Dùng nút mũi tên Lên / Xuống để sắp xếp đúng thứ tự thời gian:
@@ -409,19 +442,35 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
       {/* Action Footer Buttons (Sticky / Clear) */}
       <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
         {/* Status indicator on left */}
-        <div className="text-xs font-bold text-slate-400">
-          {!hasValidSelection()
-            ? 'Vui lòng chọn câu trả lời'
-            : !isCompleted && phase === 'first_try'
-            ? 'Đã chọn đáp án'
-            : !isCompleted && phase === 'retry'
-            ? 'Được thử lại 1 lần'
-            : 'Đã hoàn thành câu này'}
+        <div className="text-xs font-bold text-slate-500">
+          {isCorrupted
+            ? 'Câu hỏi đang cập nhật dữ liệu'
+            : isCompleted
+            ? 'Đã hoàn thành câu này'
+            : !hasValidSelection()
+            ? (question.type === 'multiple_choice'
+                ? 'Em hãy chọn một đáp án.'
+                : question.type === 'true_false'
+                ? 'Em hãy chọn Đúng hoặc Sai.'
+                : question.type === 'sequence'
+                ? 'Em hãy sắp xếp đầy đủ các sự việc theo đúng trình tự.'
+                : 'Vui lòng chọn câu trả lời')
+            : phase === 'retry'
+            ? 'Được thử lại 1 lần sau gợi ý'
+            : (question.type === 'sequence' ? 'Đã sắp xếp thứ tự' : 'Đã chọn đáp án')}
         </div>
 
         {/* Action button on right */}
         <div>
-          {!isCompleted ? (
+          {isCorrupted ? (
+            <button
+              type="button"
+              onClick={() => onSkipQuestion ? onSkipQuestion(question.id) : (isLastQuestion ? onFinishMission() : onNextQuestion())}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-black rounded-2xl shadow-md transition active:scale-95 text-sm md:text-base cursor-pointer"
+            >
+              <span>{isLastQuestion ? 'Hoàn thành bài' : 'Bỏ qua câu này →'}</span>
+            </button>
+          ) : !isCompleted ? (
             phase === 'retry' ? (
               <button
                 type="button"

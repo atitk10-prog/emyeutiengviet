@@ -13,23 +13,7 @@
 import { getDb } from './_helpers/firebaseAdmin.js';
 import { handleApiError, requireStudentSession, verifyAuthToken } from './_helpers/authMiddleware.js';
 import { ApiError, VercelApiRequest, VercelApiResponse } from './_helpers/types.js';
-
-function checkAnswerCorrectness(studentAns: any, correctAns: any): boolean {
-  if (typeof correctAns === 'boolean') {
-    return Boolean(studentAns) === correctAns;
-  }
-  if (Array.isArray(correctAns)) {
-    if (!Array.isArray(studentAns)) return false;
-    if (studentAns.length !== correctAns.length) return false;
-    for (let i = 0; i < correctAns.length; i++) {
-      if (String(studentAns[i]).trim() !== String(correctAns[i]).trim()) {
-        return false;
-      }
-    }
-    return true;
-  }
-  return String(studentAns).trim().toUpperCase() === String(correctAns).trim().toUpperCase();
-}
+import { checkAnswerCorrectness } from './_helpers/answerEvaluator.js';
 
 export default async function handler(req: VercelApiRequest, res: VercelApiResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -129,23 +113,53 @@ async function handleGetStudentLibrary(req: VercelApiRequest) {
     }
   }
 
-  const assignmentsSnap = await db
-    .collection('assignments')
-    .where('classId', '==', session.classId)
-    .where('status', '==', 'active')
-    .get();
+  const [assignmentsSnap, allAttemptsSnap] = await Promise.all([
+    db.collection('assignments')
+      .where('classId', '==', session.classId)
+      .where('status', '==', 'active')
+      .get(),
+    db.collection('attempts')
+      .where('studentId', '==', session.studentId)
+      .where('classId', '==', session.classId)
+      .get()
+  ]);
+
+  // Group attempts by assignmentId in memory (replaces N+1 sequential Firestore queries)
+  const attemptsByAssignment = new Map<string, any[]>();
+  allAttemptsSnap.docs.forEach((ad) => {
+    const attData = { id: ad.id, ...ad.data() };
+    const aId = attData.assignmentId;
+    if (!aId) return;
+    const list = attemptsByAssignment.get(aId) || [];
+    list.push(attData);
+    attemptsByAssignment.set(aId, list);
+  });
+
+  // Pre-fetch unique lesson versions in parallel
+  const versionMap = new Map<string, any>();
+  const neededPairs = Array.from(new Set(
+    assignmentsSnap.docs
+      .map((d) => `${d.data().lessonId}:::${d.data().lessonVersionId}`)
+      .filter((k) => k && !k.includes('undefined'))
+  ));
+
+  await Promise.all(
+    neededPairs.map(async (pair) => {
+      const [lId, vId] = pair.split(':::');
+      try {
+        const vDoc = await db.collection('lessons').doc(lId).collection('versions').doc(vId).get();
+        if (vDoc.exists) {
+          versionMap.set(pair, vDoc.data());
+        }
+      } catch {}
+    })
+  );
 
   const assignments: any[] = [];
 
   for (const doc of assignmentsSnap.docs) {
     const aData = doc.data();
-
-    // Check student's attempts
-    const attemptsSnap = await db
-      .collection('attempts')
-      .where('assignmentId', '==', doc.id)
-      .where('studentId', '==', session.studentId)
-      .get();
+    const attList = attemptsByAssignment.get(doc.id) || [];
 
     let inProgressAttemptId: string | null = null;
     let latestCompletedAttemptId: string | null = null;
@@ -153,22 +167,21 @@ async function handleGetStudentLibrary(req: VercelApiRequest) {
     let bestStars = 0;
     const history: any[] = [];
 
-    attemptsSnap.forEach((att) => {
-      const attData = att.data();
+    attList.forEach((attData) => {
       if (attData.status === 'completed') {
         completedCount++;
         if (attData.starsEarned > bestStars) {
           bestStars = attData.starsEarned;
         }
-        latestCompletedAttemptId = att.id;
+        latestCompletedAttemptId = attData.id;
         history.push({
-          attemptId: att.id,
+          attemptId: attData.id,
           completedAt: attData.completedAt,
           scorePercentage: attData.scorePercentage,
           starsEarned: attData.starsEarned
         });
       } else if (attData.status === 'in_progress') {
-        inProgressAttemptId = att.id;
+        inProgressAttemptId = attData.id;
       }
     });
 
@@ -185,13 +198,10 @@ async function handleGetStudentLibrary(req: VercelApiRequest) {
     let realLessonTitle = aData.lessonTitle || '';
     let realAudioUrl = aData.audioUrl || undefined;
 
-    if (aData.lessonId && aData.lessonVersionId) {
-      const vDoc = await db.collection('lessons').doc(aData.lessonId).collection('versions').doc(aData.lessonVersionId).get();
-      if (vDoc.exists) {
-        const vData = vDoc.data()!;
-        realLessonTitle = vData.title || realLessonTitle;
-        realAudioUrl = vData.audioUrl || undefined;
-      }
+    const vData = versionMap.get(`${aData.lessonId}:::${aData.lessonVersionId}`);
+    if (vData) {
+      realLessonTitle = vData.title || realLessonTitle;
+      realAudioUrl = vData.audioUrl || undefined;
     }
 
     assignments.push({
@@ -404,7 +414,35 @@ async function handleSubmitAnswer(req: VercelApiRequest, data: any) {
     throw new ApiError(404, 'not-found', `Không tìm thấy câu hỏi ${questionId} trong đáp án.`);
   }
 
-  const isMatch = checkAnswerCorrectness(answer, qDetail.correctAnswer);
+  // Retrieve question metadata (options, items, type) for robust canonical evaluation
+  let qMeta: any = { type: qDetail.type, options: qDetail.options, items: qDetail.items };
+  if ((!qMeta.options || qMeta.options.length === 0) && att.lessonId && att.lessonVersionId) {
+    try {
+      const vDoc = await db
+        .collection('lessons')
+        .doc(att.lessonId)
+        .collection('versions')
+        .doc(att.lessonVersionId)
+        .get();
+      if (vDoc.exists) {
+        const publicQuestions = vDoc.data()?.publicQuestions || [];
+        const found = publicQuestions.find((pq: any) => pq && (pq.id === questionId || pq.questionId === questionId));
+        if (found) {
+          qMeta = {
+            type: found.type || qDetail.type,
+            options: found.options || qDetail.options,
+            items: found.items || qDetail.items,
+            statement: found.statement,
+            prompt: found.prompt
+          };
+        }
+      }
+    } catch {
+      // Fallback silently to qDetail if version query fails
+    }
+  }
+
+  const isMatch = checkAnswerCorrectness(answer, qDetail.correctAnswer, qMeta);
 
   if (phase === 'first_try' || phase === 1 || phase === '1') {
     if (isMatch) {
