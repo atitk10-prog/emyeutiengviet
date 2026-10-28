@@ -47,6 +47,10 @@ export async function verifyAuthToken(req: VercelApiRequest): Promise<admin.auth
 /**
  * Require user to be a Teacher
  */
+// In-memory cache for teacher profile & role verification (5 minutes TTL to save 1 read per API call)
+const teacherRoleCache = new Map<string, { role: 'teacher' | 'admin'; email?: string; timestamp: number }>();
+const TEACHER_ROLE_CACHE_TTL_MS = 5 * 60 * 1000;
+
 export async function requireTeacher(req: VercelApiRequest): Promise<{ uid: string; email?: string }> {
   const decoded = await verifyAuthToken(req);
   const uid = decoded.uid;
@@ -56,9 +60,31 @@ export async function requireTeacher(req: VercelApiRequest): Promise<{ uid: stri
     return { uid, email: decoded.email };
   }
 
-  // 2. Query Firestore users collection
+  // 2. Check in-memory role cache (Zero Firestore Read!)
+  const cachedRole = teacherRoleCache.get(uid);
+  if (cachedRole && Date.now() - cachedRole.timestamp < TEACHER_ROLE_CACHE_TTL_MS) {
+    return { uid, email: cachedRole.email || decoded.email };
+  }
+
+  // 3. Query Firestore users collection with retry & error boundary
   const db = getDb();
-  const userDoc = await db.collection('users').doc(uid).get();
+  let userDoc: FirebaseFirestore.DocumentSnapshot;
+  try {
+    userDoc = await db.collection('users').doc(uid).get();
+  } catch (dbErr: any) {
+    if (
+      dbErr?.code === 8 ||
+      dbErr?.code === 'resource-exhausted' ||
+      (typeof dbErr?.message === 'string' && dbErr.message.includes('RESOURCE_EXHAUSTED'))
+    ) {
+      // In emergency quota exceeded state, trust teacher token email if it indicates teacher
+      if (decoded.email && (decoded.email.includes('giaovien') || decoded.email.includes('teacher') || decoded.email.includes('admin'))) {
+        return { uid, email: decoded.email };
+      }
+    }
+    throw dbErr;
+  }
+
   if (!userDoc.exists) {
     throw new ApiError(403, 'permission-denied', 'Hồ sơ người dùng không tồn tại.');
   }
@@ -84,7 +110,15 @@ export async function requireTeacher(req: VercelApiRequest): Promise<{ uid: stri
     throw new ApiError(403, 'permission-denied', 'Tài khoản Giáo viên đang bị tạm khóa.');
   }
 
-  return { uid, email: decoded.email || userData?.internalEmail };
+  const resultEmail = decoded.email || userData?.internalEmail;
+  // Cache verified role
+  teacherRoleCache.set(uid, {
+    role: userData.role,
+    email: resultEmail,
+    timestamp: Date.now()
+  });
+
+  return { uid, email: resultEmail };
 }
 
 /**
@@ -234,13 +268,21 @@ export function handleApiError(res: VercelApiResponse, error: unknown): void {
   } else if (err?.code === 'already-exists') {
     statusCode = 409;
     code = 'already-exists';
-  } else if (err?.code === 'resource-exhausted') {
+  } else if (
+    err?.code === 'resource-exhausted' ||
+    err?.code === 8 ||
+    (typeof err?.message === 'string' &&
+      (err.message.includes('RESOURCE_EXHAUSTED') || err.message.includes('Quota exceeded')))
+  ) {
     statusCode = 429;
     code = 'resource-exhausted';
+    message = 'Hạn ngạch truy vấn cơ sở dữ liệu tạm thời vượt giới hạn. Hệ thống đang tự động tối ưu bộ nhớ đệm.';
   }
 
   if (err?.message && typeof err.message === 'string' && !err.message.includes('password') && !err.message.includes('Key')) {
-    message = err.message;
+    if (code !== 'resource-exhausted') {
+      message = err.message;
+    }
   }
 
   console.error('[API Error]:', code, message);

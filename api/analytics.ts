@@ -176,7 +176,7 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
 
 // In-memory cache for teacher analytics to prevent repetitive heavy calculations on rapid navigation
 const teacherAnalyticsCache = new Map<string, { result: any; timestamp: number }>();
-const TEACHER_ANALYTICS_CACHE_TTL_MS = 45 * 1000; // 45 seconds
+const TEACHER_ANALYTICS_CACHE_TTL_MS = 180 * 1000; // 3 minutes (180s) to protect Firestore quota
 
 // Helper to chunk array for bounded concurrency
 function chunkArray<T>(items: T[], size: number): T[][] {
@@ -348,9 +348,9 @@ async function handleGetTeacherAnalytics(req: VercelApiRequest, data: any) {
     })
   );
 
-  // Sample or chunk responses for skill breakdown (bounded to 40 recent attempts for fast sub-second analysis)
-  const targetResponseAttempts = attemptsDocs.length > 40
-    ? attemptsDocs.slice(0, 40)
+  // Sample or chunk responses for skill breakdown (strictly bounded to 8 recent attempts to save 150+ Firestore reads)
+  const targetResponseAttempts = attemptsDocs.length > 8
+    ? attemptsDocs.slice(0, 8)
     : attemptsDocs;
 
   const attemptChunks = chunkArray(targetResponseAttempts, 10);

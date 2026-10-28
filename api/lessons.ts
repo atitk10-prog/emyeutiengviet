@@ -19,6 +19,7 @@ import { getDb } from './_helpers/firebaseAdmin.js';
 import { handleApiError, requireTeacher, requireTeacherOrAdmin } from './_helpers/authMiddleware.js';
 import { ApiError, VercelApiRequest, VercelApiResponse } from './_helpers/types.js';
 import { sanitizeQuestionData, validateQuestionForPublish } from './_helpers/answerEvaluator.js';
+import { findSeedLesson, SEED_LESSONS } from './_helpers/seedLessons.js';
 
 export default async function handler(req: VercelApiRequest, res: VercelApiResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -120,12 +121,116 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
   }
 }
 
-// 1. GET TEACHER LESSONS
+// In-memory cache for teacher lessons (2 minutes TTL)
+const teacherLessonsCache = new Map<string, { result: any; timestamp: number }>();
+const TEACHER_LESSONS_CACHE_TTL_MS = 2 * 60 * 1000;
+
+// In-memory cache for lesson details (5 minutes TTL)
+const lessonDetailCache = new Map<string, { result: any; timestamp: number }>();
+const LESSON_DETAIL_CACHE_TTL_MS = 5 * 60 * 1000;
+
+// Helper to construct seed lesson response with 0 Firestore reads
+function buildSeedLessonDetailResponse(seed: any, isOwner: boolean) {
+  const publicQuestions = seed.questions.map((q: any) => ({
+    id: q.id,
+    type: q.type,
+    prompt: q.prompt,
+    options: q.options || undefined,
+    statement: q.statement || undefined,
+    items: q.items || undefined,
+    pairs: q.pairs || undefined,
+    passageWithBlanks: q.passageWithBlanks || undefined,
+    blanks: q.blanks || undefined,
+    skillTag: q.skillTag,
+    difficulty: q.difficulty,
+    relatedPassagePart: q.relatedPassagePart || ''
+  }));
+
+  const privateAnswersMap: Record<string, any> = {};
+  const privateAnswersList: any[] = [];
+  seed.questions.forEach((q: any) => {
+    const item = {
+      questionId: q.id,
+      id: q.id,
+      correctAnswer: q.answer,
+      answer: q.answer,
+      hint: q.hint || '',
+      explanation: q.explanation || ''
+    };
+    privateAnswersMap[q.id] = item;
+    privateAnswersList.push(item);
+  });
+
+  const versionData = {
+    versionId: `${seed.id}-v1`,
+    lessonId: seed.id,
+    versionNumber: 1,
+    title: seed.title,
+    passage: seed.passage,
+    grade: seed.grade,
+    topic: seed.topic,
+    vocabulary: seed.vocabulary,
+    publicQuestions,
+    totalQuestions: seed.questions.length,
+    createdAt: 1700000000000,
+    publishedAt: 1700000000000
+  };
+
+  const lessonData = {
+    id: seed.id,
+    teacherUid: 'system',
+    title: seed.title,
+    topic: seed.topic,
+    grade: seed.grade,
+    passage: seed.passage,
+    vocabulary: seed.vocabulary,
+    status: 'published',
+    currentVersionId: `${seed.id}-v1`,
+    currentVersionNumber: 1,
+    createdAt: 1700000000000,
+    updatedAt: 1700000000000
+  };
+
+  return {
+    success: true,
+    lesson: lessonData,
+    version: versionData,
+    versionsList: [
+      {
+        versionId: `${seed.id}-v1`,
+        id: `${seed.id}-v1`,
+        versionNumber: 1,
+        title: seed.title,
+        passage: seed.passage,
+        grade: seed.grade,
+        topic: seed.topic,
+        totalQuestions: seed.questions.length,
+        hasAudio: false,
+        audioUrl: null,
+        audioMetadata: null,
+        publishedAt: 1700000000000,
+        createdAt: 1700000000000
+      }
+    ],
+    assignmentsList: [],
+    privateAnswers: isOwner ? privateAnswersMap : null,
+    privateAnswersList: isOwner ? privateAnswersList : []
+  };
+}
+
+// 1. GET TEACHER LESSONS (With Caching and Bounded Queries)
 async function handleGetTeacherLessons(req: VercelApiRequest, data: any) {
   const { uid: teacherUid } = await requireTeacher(req);
   const { status, grade, semester } = data || {};
-  const db = getDb();
 
+  // Check cache first
+  const cacheKey = `${teacherUid}_${status || 'all'}_${grade || 'all'}_${semester || 'all'}`;
+  const cached = teacherLessonsCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < TEACHER_LESSONS_CACHE_TTL_MS) {
+    return cached.result;
+  }
+
+  const db = getDb();
   let lessonQuery: FirebaseFirestore.Query = db.collection('lessons').where('teacherUid', '==', teacherUid);
   if (status && status !== 'all') {
     lessonQuery = lessonQuery.where('status', '==', status);
@@ -137,13 +242,41 @@ async function handleGetTeacherLessons(req: VercelApiRequest, data: any) {
     lessonQuery = lessonQuery.where('semester', '==', Number(semester));
   }
 
-  const [snap, allAssignSnap] = await Promise.all([
-    lessonQuery.get(),
-    db.collection('assignments')
-      .where('teacherUid', '==', teacherUid)
-      .where('status', '==', 'active')
-      .get()
-  ]);
+  let snap: FirebaseFirestore.QuerySnapshot;
+  let allAssignSnap: FirebaseFirestore.QuerySnapshot;
+
+  try {
+    [snap, allAssignSnap] = await Promise.all([
+      lessonQuery.limit(50).get(),
+      db.collection('assignments')
+        .where('teacherUid', '==', teacherUid)
+        .where('status', '==', 'active')
+        .limit(100)
+        .get()
+    ]);
+  } catch (err: any) {
+    // If under quota restriction, return cached or built-in seed lessons
+    if (
+      err?.code === 8 ||
+      err?.code === 'resource-exhausted' ||
+      (typeof err?.message === 'string' && err.message.includes('RESOURCE_EXHAUSTED'))
+    ) {
+      const fallbackLessons = SEED_LESSONS.filter((s) => !grade || s.grade === Number(grade)).map((s) => ({
+        id: s.id,
+        title: s.title,
+        topic: s.topic,
+        grade: s.grade,
+        status: 'published',
+        currentVersionId: `${s.id}-v1`,
+        assignedClassCount: 0,
+        isSystemLesson: true,
+        createdAt: 1700000000000,
+        updatedAt: 1700000000000
+      }));
+      return { success: true, lessons: fallbackLessons };
+    }
+    throw err;
+  }
 
   // Group active assignments by lessonId in memory (replaces N+1 sequential Firestore queries)
   const assignmentsByLesson = new Map<string, any[]>();
@@ -174,16 +307,21 @@ async function handleGetTeacherLessons(req: VercelApiRequest, data: any) {
 
   // Include system/seed lessons if teacher has none or requests all
   if (lessons.length === 0 || status === 'all') {
-    const publishedSnap = await db.collection('lessons').where('status', '==', 'published').get();
-    publishedSnap.forEach((doc) => {
-      const sData = doc.data();
-      const isSeed = doc.id.startsWith('seed-') || sData.teacherUid === 'system' || sData.teacherUid === 'seed_teacher_uid';
-      if (isSeed && !lessons.some((l) => l.id === doc.id)) {
-        if (!grade || sData.grade === Number(grade)) {
+    // Inject seed lessons from in-memory repository (0 Firestore reads!)
+    SEED_LESSONS.forEach((s) => {
+      if (!lessons.some((l) => l.id === s.id)) {
+        if (!grade || s.grade === Number(grade)) {
           lessons.push({
-            ...sData,
+            id: s.id,
+            title: s.title,
+            topic: s.topic,
+            grade: s.grade,
+            status: 'published',
+            currentVersionId: `${s.id}-v1`,
             assignedClassCount: 0,
-            isSystemLesson: true
+            isSystemLesson: true,
+            createdAt: 1700000000000,
+            updatedAt: 1700000000000
           });
         }
       }
@@ -191,84 +329,139 @@ async function handleGetTeacherLessons(req: VercelApiRequest, data: any) {
   }
 
   lessons.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  return { success: true, lessons };
+  const result = { success: true, lessons };
+
+  // Save to cache
+  teacherLessonsCache.set(cacheKey, { result, timestamp: Date.now() });
+  return result;
 }
 
-// 2. GET LESSON DETAIL
+// 2. GET LESSON DETAIL (With Caching, previewOnly mode, and Seed Fallback)
 async function handleGetLessonDetail(req: VercelApiRequest, data: any) {
   const { uid: teacherUid } = await requireTeacher(req);
-  const { lessonId, versionId } = data || {};
+  const { lessonId, versionId, previewOnly } = data || {};
 
   if (!lessonId) {
     throw new ApiError(400, 'invalid-argument', 'Vui lòng cung cấp mã bài đọc.');
   }
 
+  const isSeed = lessonId.startsWith('seed-');
+  const cacheKey = `${lessonId}_${versionId || 'current'}_${teacherUid}_${Boolean(previewOnly)}`;
+  const cached = lessonDetailCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < LESSON_DETAIL_CACHE_TTL_MS) {
+    return cached.result;
+  }
+
+  // Check seed lesson fallback early for 0-read execution
+  const seedDef = isSeed ? findSeedLesson(lessonId) : undefined;
+
   const db = getDb();
-  const lessonDoc = await db.collection('lessons').doc(lessonId).get();
+  let lessonDoc: FirebaseFirestore.DocumentSnapshot | null = null;
+
+  try {
+    lessonDoc = await db.collection('lessons').doc(lessonId).get();
+  } catch (err: any) {
+    // If quota is exhausted and it is a seed lesson, return static definition directly!
+    if (
+      seedDef &&
+      (err?.code === 8 ||
+        err?.code === 'resource-exhausted' ||
+        (typeof err?.message === 'string' && err.message.includes('RESOURCE_EXHAUSTED')))
+    ) {
+      const seedResponse = buildSeedLessonDetailResponse(seedDef, true);
+      lessonDetailCache.set(cacheKey, { result: seedResponse, timestamp: Date.now() });
+      return seedResponse;
+    }
+    throw err;
+  }
+
   if (!lessonDoc.exists) {
+    if (seedDef) {
+      const seedResponse = buildSeedLessonDetailResponse(seedDef, true);
+      lessonDetailCache.set(cacheKey, { result: seedResponse, timestamp: Date.now() });
+      return seedResponse;
+    }
     throw new ApiError(404, 'not-found', 'Bài đọc không tồn tại.');
   }
 
   const lessonData = lessonDoc.data()!;
-  const isSeed = lessonId.startsWith('seed-') || lessonData.teacherUid === 'system' || lessonData.teacherUid === 'seed_teacher_uid';
-  const isOwner = lessonData.teacherUid === teacherUid || isSeed;
-
+  const isOwner = lessonData.teacherUid === teacherUid || isSeed || lessonData.teacherUid === 'system' || lessonData.teacherUid === 'seed_teacher_uid';
   const targetVersionId = versionId || lessonData.currentVersionId;
   let versionData: any = null;
   let privateAnswers: any = null;
 
   if (targetVersionId) {
-    const vDoc = await db.collection('lessons').doc(lessonId).collection('versions').doc(targetVersionId).get();
-    if (vDoc.exists) {
-      versionData = vDoc.data();
-    }
-    if (isOwner) {
-      const keyDoc = await db.collection('privateAnswerKeys').doc(targetVersionId).get();
-      if (keyDoc.exists) {
+    try {
+      const [vDoc, keyDoc] = await Promise.all([
+        db.collection('lessons').doc(lessonId).collection('versions').doc(targetVersionId).get(),
+        isOwner ? db.collection('privateAnswerKeys').doc(targetVersionId).get() : Promise.resolve(null)
+      ]);
+      if (vDoc.exists) {
+        versionData = vDoc.data();
+      }
+      if (keyDoc && keyDoc.exists) {
         privateAnswers = keyDoc.data()?.answers || null;
       }
+    } catch (vErr: any) {
+      if (seedDef) {
+        const seedResponse = buildSeedLessonDetailResponse(seedDef, isOwner);
+        lessonDetailCache.set(cacheKey, { result: seedResponse, timestamp: Date.now() });
+        return seedResponse;
+      }
+      throw vErr;
     }
   }
 
-  // Fetch all immutable versions of this lesson (Phase 2 & Module 2.1)
-  const versionsSnap = await db.collection('lessons').doc(lessonId).collection('versions').get();
-  const versionsList = versionsSnap.docs.map((vd) => {
-    const v = vd.data();
-    return {
-      versionId: vd.id,
-      id: vd.id,
-      versionNumber: v.versionNumber || (vd.id.includes('v1') ? 1 : 2),
-      title: v.title || lessonData.title,
-      passage: v.passage || '',
-      grade: v.grade || lessonData.grade,
-      topic: v.topic || lessonData.topic,
-      totalQuestions: v.publicQuestions?.length || v.totalQuestions || 5,
-      hasAudio: Boolean(v.audioUrl),
-      audioUrl: v.audioUrl || null,
-      audioMetadata: v.audioMetadata || null,
-      publishedAt: v.publishedAt || v.createdAt || null,
-      createdAt: v.createdAt || null
-    };
-  }).sort((a, b) => a.versionNumber - b.versionNumber);
+  let versionsList: any[] = [];
+  let assignmentsList: any[] = [];
 
-  // Fetch all assignments using this lesson
-  const assignmentsSnap = await db.collection('assignments').where('lessonId', '==', lessonId).get();
-  const assignmentsList = assignmentsSnap.docs.map((ad) => {
-    const a = ad.data();
-    return {
-      id: ad.id,
-      assignmentId: ad.id,
-      classId: a.classId,
-      lessonId: a.lessonId,
-      lessonVersionId: a.lessonVersionId,
-      lessonVersionNumber: a.lessonVersionNumber || (a.lessonVersionId?.includes('v1') ? 1 : 2),
-      roundName: a.roundName || 'Đợt 1',
-      title: a.title,
-      academicYear: a.academicYear || '2026-2027',
-      status: a.status || 'active',
-      createdAt: a.createdAt || null
-    };
-  });
+  // SKIP querying versions subcollection and assignments collection if previewOnly is requested!
+  if (!previewOnly) {
+    try {
+      const [versionsSnap, assignmentsSnap] = await Promise.all([
+        db.collection('lessons').doc(lessonId).collection('versions').limit(20).get(),
+        db.collection('assignments').where('lessonId', '==', lessonId).limit(50).get()
+      ]);
+
+      versionsList = versionsSnap.docs.map((vd) => {
+        const v = vd.data();
+        return {
+          versionId: vd.id,
+          id: vd.id,
+          versionNumber: v.versionNumber || (vd.id.includes('v1') ? 1 : 2),
+          title: v.title || lessonData.title,
+          passage: v.passage || '',
+          grade: v.grade || lessonData.grade,
+          topic: v.topic || lessonData.topic,
+          totalQuestions: v.publicQuestions?.length || v.totalQuestions || 5,
+          hasAudio: Boolean(v.audioUrl),
+          audioUrl: v.audioUrl || null,
+          audioMetadata: v.audioMetadata || null,
+          publishedAt: v.publishedAt || v.createdAt || null,
+          createdAt: v.createdAt || null
+        };
+      }).sort((a, b) => a.versionNumber - b.versionNumber);
+
+      assignmentsList = assignmentsSnap.docs.map((ad) => {
+        const a = ad.data();
+        return {
+          id: ad.id,
+          assignmentId: ad.id,
+          classId: a.classId,
+          lessonId: a.lessonId,
+          lessonVersionId: a.lessonVersionId,
+          lessonVersionNumber: a.lessonVersionNumber || (a.lessonVersionId?.includes('v1') ? 1 : 2),
+          roundName: a.roundName || 'Đợt 1',
+          title: a.title,
+          academicYear: a.academicYear || '2026-2027',
+          status: a.status || 'active',
+          createdAt: a.createdAt || null
+        };
+      });
+    } catch (subErr) {
+      console.warn('[handleGetLessonDetail] Non-fatal subcollection query error:', subErr);
+    }
+  }
 
   let privateAnswersList: any[] = [];
   let privateAnswersMap: Record<string, any> = {};
@@ -299,7 +492,15 @@ async function handleGetLessonDetail(req: VercelApiRequest, data: any) {
     }
   }
 
-  return {
+  // If questions empty but seed definition exists, inject seed questions
+  if ((!versionData || !versionData.publicQuestions || versionData.publicQuestions.length === 0) && seedDef) {
+    const seedFallback = buildSeedLessonDetailResponse(seedDef, isOwner);
+    versionData = seedFallback.version;
+    privateAnswersMap = seedFallback.privateAnswers || {};
+    privateAnswersList = seedFallback.privateAnswersList || [];
+  }
+
+  const result = {
     success: true,
     lesson: lessonData,
     version: versionData,
@@ -308,6 +509,9 @@ async function handleGetLessonDetail(req: VercelApiRequest, data: any) {
     privateAnswers: isOwner ? privateAnswersMap : null,
     privateAnswersList: isOwner ? privateAnswersList : []
   };
+
+  lessonDetailCache.set(cacheKey, { result, timestamp: Date.now() });
+  return result;
 }
 
 // 3. SAVE LESSON DRAFT

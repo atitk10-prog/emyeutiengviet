@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -313,6 +313,7 @@ export const TeacherDashboard: React.FC = () => {
   const [previewUserAnswers, setPreviewUserAnswers] = useState<Record<string, any>>({});
   const [previewShowHint, setPreviewShowHint] = useState<Record<string, boolean>>({});
   const [previewFontSize, setPreviewFontSize] = useState<'base' | 'lg' | 'xl' | '2xl'>('lg');
+  const previewCacheRef = useRef<Map<string, any>>(new Map());
 
   // Remediation & Pedagogical Activity Center (Module 4: NĂM HỌC → KHỐI → LỚP → PHẠM VI PHÂN TÍCH)
   const [remedNavYear, setRemedNavYear] = useState<string | null>(null);
@@ -480,23 +481,6 @@ export const TeacherDashboard: React.FC = () => {
       }
     })();
 
-    // 4. Fetch Analytics asynchronously in parallel (non-blocking for UI interaction)
-    setLoadingAnalytics(true);
-    const pAnalytics = (async () => {
-      try {
-        const getAnalytics = httpsCallable(functions, 'getTeacherAnalytics');
-        const aRes: any = await getAnalytics({});
-        if (aRes?.data) {
-          setAnalytics(aRes.data);
-        }
-      } catch (e: any) {
-        console.warn('Could not fetch analytics:', e);
-        setAnalyticsError('Không thể tải dữ liệu thống kê đọc hiểu. Bấm để thử lại.');
-      } finally {
-        setLoadingAnalytics(false);
-      }
-    })();
-
     // Await ESSENTIAL data (Classes and Lessons in parallel) so UI becomes interactive in ~1-2s
     try {
       await Promise.all([pClasses, pLessons]);
@@ -505,7 +489,38 @@ export const TeacherDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
+
+    // Lazy load analytics only if teacher is already on overview tab
+    if (activeTab === 'overview') {
+      loadAnalyticsData();
+    }
   };
+
+  // Lazy-load Analytics only when teacher accesses Overview tab (prevents hundreds of reads on library/preview)
+  const loadAnalyticsData = async (force: boolean = false) => {
+    if (analytics && !force) return;
+    setLoadingAnalytics(true);
+    setAnalyticsError(null);
+    try {
+      const getAnalytics = httpsCallable(functions, 'getTeacherAnalytics');
+      const aRes: any = await getAnalytics({});
+      if (aRes?.data) {
+        setAnalytics(aRes.data);
+      }
+    } catch (e: any) {
+      console.warn('Could not fetch analytics:', e);
+      setAnalyticsError('Không thể tải dữ liệu thống kê đọc hiểu. Bấm để thử lại.');
+    } finally {
+      setLoadingAnalytics(false);
+    }
+  };
+
+  // Effect to load analytics lazily when switching to overview tab
+  useEffect(() => {
+    if (user && activeTab === 'overview' && !analytics) {
+      loadAnalyticsData();
+    }
+  }, [user, activeTab, analytics]);
 
   const loadStudentsForClass = async (classId: string) => {
     try {
@@ -1928,12 +1943,38 @@ export const TeacherDashboard: React.FC = () => {
     }
   };
 
-  // Open Student Preview Modal (P0 - Read-Only Simulation)
+  // Open Student Preview Modal (P0 - Zero-Read Cached Interactive Simulator)
   const handleOpenStudentPreview = async (lesson: Lesson, versionId?: string) => {
+    const targetVerId = versionId || lesson.currentVersionId || 'current';
+    const cacheKey = `${lesson.id}_${targetVerId}`;
+
+    // 1. Check in-memory preview cache first (Zero network, Zero Firestore read, 0ms latency)
+    const cachedPreview = previewCacheRef.current.get(cacheKey);
+    if (cachedPreview) {
+      setPreviewModalLesson(cachedPreview);
+      setPreviewQuestionIdx(0);
+      setPreviewUserAnswers({});
+      setPreviewShowHint({});
+      return;
+    }
+
+    // 2. Prepare immediate local fallback if questions/passage are already present in memory
+    const localQuestions = (lesson.draftData?.questions || (lesson as any).questions || []).map((q: any) => {
+      const ans = q.correctAnswer !== undefined ? q.correctAnswer : q.answer;
+      return {
+        ...q,
+        correctAnswer: ans,
+        answer: ans,
+        hint: q.hint || '',
+        explanation: q.explanation || ''
+      };
+    });
+
     setLoading(true);
     try {
       const getDetail = httpsCallable(functions, 'getLessonDetail');
-      const res: any = await getDetail({ lessonId: lesson.id, versionId });
+      // Pass previewOnly: true so backend skips reading all versions and all assignments!
+      const res: any = await getDetail({ lessonId: lesson.id, versionId, previewOnly: true });
       if (res.data?.success) {
         const { version, lesson: lData, privateAnswers } = res.data;
         let questions = (version?.publicQuestions || []).map((q: any) => {
@@ -1949,34 +1990,61 @@ export const TeacherDashboard: React.FC = () => {
         });
 
         // Fallback to draftData questions if published version has empty questions
-        if ((!questions || questions.length === 0) && lData.draftData?.questions?.length > 0) {
-          questions = lData.draftData.questions.map((q: any) => {
-            const ans = q.correctAnswer !== undefined ? q.correctAnswer : q.answer;
-            return {
-              ...q,
-              correctAnswer: ans,
-              answer: ans,
-              hint: q.hint || '',
-              explanation: q.explanation || ''
-            };
-          });
+        if ((!questions || questions.length === 0) && (lData?.draftData?.questions?.length > 0 || localQuestions.length > 0)) {
+          questions = lData?.draftData?.questions?.length > 0
+            ? lData.draftData.questions.map((q: any) => ({
+                ...q,
+                correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : q.answer,
+                answer: q.correctAnswer !== undefined ? q.correctAnswer : q.answer,
+                hint: q.hint || '',
+                explanation: q.explanation || ''
+              }))
+            : localQuestions;
         }
 
-        setPreviewModalLesson({
-          title: version?.title || lData.title,
-          passage: version?.passage || lData.passage || '',
-          grade: version?.grade || lData.grade,
-          topic: version?.topic || lData.topic,
-          audioUrl: version?.audioUrl || lData.audioUrl || undefined,
-          vocabulary: version?.vocabulary || lData.vocabulary || [],
+        const previewData = {
+          title: version?.title || lData?.title || lesson.title,
+          passage: version?.passage || lData?.passage || (lesson as any).passage || '',
+          grade: version?.grade || lData?.grade || lesson.grade,
+          topic: version?.topic || lData?.topic || lesson.topic,
+          audioUrl: version?.audioUrl || lData?.audioUrl || lesson.audioUrl || undefined,
+          audioMetadata: version?.audioMetadata || lData?.audioMetadata || lesson.audioMetadata || undefined,
+          vocabulary: version?.vocabulary || lData?.vocabulary || (lesson as any).vocabulary || [],
           questions
-        });
+        };
+
+        // Cache so opening preview 10 times costs 0 additional reads
+        previewCacheRef.current.set(cacheKey, previewData);
+
+        setPreviewModalLesson(previewData);
         setPreviewQuestionIdx(0);
         setPreviewUserAnswers({});
         setPreviewShowHint({});
+      } else {
+        throw new Error(res.data?.message || 'Không thể tải chi tiết bài đọc.');
       }
     } catch (err: any) {
-      alert('Lỗi mở bản xem trước: ' + err.message);
+      console.warn('handleOpenStudentPreview fallback:', err);
+      // Fallback: If we have local passage or questions, show preview without blocking teacher
+      const fallbackPassage = (lesson as any).passage || lesson.draftData?.passage || '';
+      if (fallbackPassage || localQuestions.length > 0) {
+        const fallbackData = {
+          title: lesson.title,
+          passage: fallbackPassage,
+          grade: lesson.grade,
+          topic: lesson.topic,
+          audioUrl: lesson.audioUrl || undefined,
+          vocabulary: (lesson as any).vocabulary || lesson.draftData?.vocabulary || [],
+          questions: localQuestions
+        };
+        previewCacheRef.current.set(cacheKey, fallbackData);
+        setPreviewModalLesson(fallbackData);
+        setPreviewQuestionIdx(0);
+        setPreviewUserAnswers({});
+        setPreviewShowHint({});
+      } else {
+        alert('Lỗi mở bản xem trước: ' + (err.message || 'Hệ thống đang bận, vui lòng thử lại sau.'));
+      }
     } finally {
       setLoading(false);
     }

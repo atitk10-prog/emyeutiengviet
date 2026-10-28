@@ -127,7 +127,7 @@ async function handleGetStudentLibrary(req: VercelApiRequest) {
   // Group attempts by assignmentId in memory (replaces N+1 sequential Firestore queries)
   const attemptsByAssignment = new Map<string, any[]>();
   allAttemptsSnap.docs.forEach((ad) => {
-    const attData = { id: ad.id, ...ad.data() };
+    const attData: any = { id: ad.id, ...ad.data() };
     const aId = attData.assignmentId;
     if (!aId) return;
     const list = attemptsByAssignment.get(aId) || [];
