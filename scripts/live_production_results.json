@@ -1,65 +1,19 @@
-[
-  {
-    "step": "1. Đăng nhập Giáo viên (giaovien01)",
-    "endpoint": "/api/auth (accountLogin)",
-    "status": "PASS",
-    "latencyMs": 2748,
-    "details": "Role: teacher, UID: B5H9PeMrZowS3ewPm4BQ8aM4fkU1, ID Token: Hợp lệ 100%"
+{
+  "timestamp": "2026-10-28T05:50:13.142Z",
+  "baseUrl": "https://emyeutiengviet-zeta.vercel.app",
+  "targetProject": "emyeutiengviet-prod",
+  "benchmarks": {
+    "admin_login_latency_ms": 1313,
+    "admin_overview_latency_ms": 293,
+    "admin_classes_latency_ms": 301,
+    "teacher_login_latency_ms": 1022,
+    "teacher_lessons_latency_ms": 340,
+    "teacher_classes_latency_ms": 401,
+    "teacher_preview_latency_ms": 267,
+    "student_login_latency_ms": 1171,
+    "student_library_latency_ms": 1466,
+    "student_start_attempt_latency_ms": 811,
+    "student_finish_attempt_latency_ms": 645
   },
-  {
-    "step": "2. Đăng nhập Học sinh (HS002)",
-    "endpoint": "/api/auth (accountLogin)",
-    "status": "PASS",
-    "latencyMs": 3879,
-    "details": "Học sinh: Trần Thu Phương Linh (Mã: HS002), Lớp: class_2a"
-  },
-  {
-    "step": "3. Truy vấn Thư viện bài tập được giao",
-    "endpoint": "/api/attempts (getStudentLibrary)",
-    "status": "PASS",
-    "latencyMs": 3491,
-    "details": "Tìm thấy 5 bài giao. Chọn bài kiểm chứng: \"Cây bàng non và gió xuân-2\" (ID: kXVCNPYpze5s10W0ya4G)"
-  },
-  {
-    "step": "4. Bắt đầu lượt làm bài & Kiểm tra 3 dạng câu hỏi",
-    "endpoint": "/api/attempts (startAttempt)",
-    "status": "PASS",
-    "latencyMs": 1960,
-    "details": "AttemptId: RjQUtQlQkcLrqkxcsRYO, Có đủ 3 dạng: MCQ (true), T/F (true), Sắp xếp (true). Số sự việc sắp xếp: 3 sự việc."
-  },
-  {
-    "step": "5. SỬA LỖI 1: Chọn đáp án B được chấm ĐÚNG",
-    "endpoint": "/api/attempts (submitAnswer - Q1)",
-    "status": "PASS",
-    "latencyMs": 1911,
-    "details": "Chọn B -> Kết quả chấm: ĐÚNG (PASS). Giải thích: \"Dưới gốc cây, một vỏ chai nhựa nằm lăn lóc từ hôm qua, làm cành lá buồn bã.\""
-  },
-  {
-    "step": "6. Quy trình sư phạm 2 pha: Gợi ý khi sai -> Thử lại thành công",
-    "endpoint": "/api/attempts (submitAnswer 2-Phase - q3)",
-    "status": "PASS",
-    "latencyMs": 3972,
-    "details": "Lần 1: Sai -> Nhận gợi ý: \"Đọc lại phần giải nghĩa từ vựng và ngữ cảnh trong bài.\", canRetry=true -> Lần 2: Sửa đúng (true)"
-  },
-  {
-    "step": "7. SỬA LỖI 2: Câu sắp xếp có đủ sự việc & Chấm điểm chính xác",
-    "endpoint": "/api/attempts (submitAnswer - Sequence)",
-    "status": "PASS",
-    "latencyMs": 1908,
-    "details": "Hiển thị đủ 3 sự việc. Nộp trình tự -> Kết quả chấm: ĐÚNG (PASS)"
-  },
-  {
-    "step": "8. Nộp bài hoàn thành & Lưu kết quả vào Firestore",
-    "endpoint": "/api/attempts (finishAttempt)",
-    "status": "PASS",
-    "latencyMs": 1487,
-    "details": "Trạng thái: completed, Số câu đúng: 3/5, Tỷ lệ: 60%, Số sao: 2 ⭐"
-  },
-  {
-    "step": "9. Giáo viên xem kết quả bài làm trên Dashboard Production",
-    "endpoint": "/api/analytics (getTeacherAnalytics)",
-    "status": "PASS",
-    "latencyMs": 4341,
-    "details": "Tổng 1 lớp, 19 học sinh, Đúng lần đầu: 78%, Sau gợi ý: 93%, Mức tiến bộ: +15%"
-  }
-]
+  "success": true
+}
