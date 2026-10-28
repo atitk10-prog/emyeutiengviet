@@ -13,12 +13,12 @@ const useEmulator = metaEnv.DEV
   : metaEnv.VITE_USE_FIREBASE_EMULATOR === 'true';
 
 const firebaseConfig = {
-  apiKey: metaEnv.VITE_FIREBASE_API_KEY || (useEmulator ? 'AIzaSyDemoDummyKeyForEmulatorUsageOnly123' : 'AIzaSyB8T4cebLbZCX2Je--ndjaeHl_l8wo6spw'),
-  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || (useEmulator ? 'em-yeu-tieng-viet-demo.firebaseapp.com' : 'em-yeu-tieng-viet---staging.firebaseapp.com'),
-  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || (useEmulator ? 'em-yeu-tieng-viet-demo' : 'em-yeu-tieng-viet---staging'),
-  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || (useEmulator ? 'em-yeu-tieng-viet-demo.appspot.com' : 'em-yeu-tieng-viet---staging.firebasestorage.app'),
-  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || (useEmulator ? '1234567890' : '758607123287'),
-  appId: metaEnv.VITE_FIREBASE_APP_ID || (useEmulator ? '1:1234567890:web:abcdef123456' : '1:758607123287:web:f53f8b67be3b2c59bd2412')
+  apiKey: metaEnv.VITE_FIREBASE_API_KEY || (useEmulator ? 'AIzaSyDemoDummyKeyForEmulatorUsageOnly123' : 'AIzaSyDhx3ubazUjmaaNdhmXSD3uDhVD1s0fHCk'),
+  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || (useEmulator ? 'em-yeu-tieng-viet-demo.firebaseapp.com' : 'emyeutiengviet-prod.firebaseapp.com'),
+  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || (useEmulator ? 'em-yeu-tieng-viet-demo' : 'emyeutiengviet-prod'),
+  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || (useEmulator ? 'em-yeu-tieng-viet-demo.appspot.com' : 'emyeutiengviet-prod.firebasestorage.app'),
+  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || (useEmulator ? '1234567890' : '662875205963'),
+  appId: metaEnv.VITE_FIREBASE_APP_ID || (useEmulator ? '1:1234567890:web:abcdef123456' : '1:662875205963:web:cf79da18f2186cf1e8b8ce')
 };
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
