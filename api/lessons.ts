@@ -1208,82 +1208,137 @@ Trả về DUY NHẤT định dạng JSON thuần dạng:
     // Guarantee exact question count as requested by teacher
     if (draft.questions.length > totalQuestions) {
       draft.questions = draft.questions.slice(0, totalQuestions);
-    } else if (draft.questions.length < totalQuestions) {
+    } else if (draft.questions.length < totalQuestions && draft.passage) {
       const missingCount = totalQuestions - draft.questions.length;
-      console.warn(`[Gemini AI] Draft generated ${draft.questions.length}/${totalQuestions} questions. Synthesizing ${missingCount} questions to meet requirement...`);
+      console.warn(`[Gemini AI] Draft generated ${draft.questions.length}/${totalQuestions} questions. Requesting supplement from AI for ${missingCount} questions...`);
+
+      const missingTypes: string[] = [];
       for (let i = 0; i < missingCount; i++) {
-        const qIdx = draft.questions.length;
-        const qType = activeTypes[qIdx % activeTypes.length];
-        if (qType === 'true_false') {
-          draft.questions.push(sanitizeQuestionData({
-            id: `q${qIdx + 1}`,
-            type: 'true_false',
-            prompt: `Nhận định về bài đọc "${draft.title || 'bài đọc'}":`,
-            statement: `Nội dung bài đọc thể hiện thông điệp ý nghĩa và trong sáng.`,
-            answer: true,
-            hint: 'Em hãy đọc kỹ lại đoạn văn để xác nhận chi tiết nhé.',
-            explanation: 'Nội dung bài đọc thể hiện tình cảm và bài học bổ ích cho học sinh.',
-            skillTag: 'noi_dung_chinh',
-            difficulty: 'thong_hieu'
-          }, qIdx));
-        } else if (qType === 'matching') {
-          draft.questions.push(sanitizeQuestionData({
-            id: `q${qIdx + 1}`,
-            type: 'matching',
-            prompt: 'Ghép từ ngữ hoặc chi tiết ở cột trái với nội dung thích hợp ở cột phải:',
-            leftItems: ['Chi tiết 1', 'Chi tiết 2', 'Chi tiết 3'],
-            rightItems: ['Nội dung tương ứng 1', 'Nội dung tương ứng 2', 'Nội dung tương ứng 3'],
-            matchingPairs: {
-              'Chi tiết 1': 'Nội dung tương ứng 1',
-              'Chi tiết 2': 'Nội dung tương ứng 2',
-              'Chi tiết 3': 'Nội dung tương ứng 3'
-            },
-            hint: 'Em hãy đọc lại từng câu trong bài để nối cho đúng nhé.',
-            explanation: 'Mỗi chi tiết đều được miêu tả rõ ràng trong bài đọc.',
-            skillTag: 'tu_trong_ngu_canh',
-            difficulty: 'thong_hieu'
-          }, qIdx));
-        } else if (qType === 'fill_blank') {
-          draft.questions.push(sanitizeQuestionData({
-            id: `q${qIdx + 1}`,
-            type: 'fill_blank',
-            prompt: 'Em hãy tìm từ ngữ thích hợp trong bài để điền vào chỗ trống:',
-            blankContext: `Bài đọc mang lại cảm xúc [ ... ] cho các bạn nhỏ.`,
-            answer: 'vui tươi',
-            acceptedAnswers: ['vui tươi', 'hân hoan'],
-            hint: 'Em hãy tìm từ miêu tả cảm xúc được nhắc đến trong bài đọc nhé.',
-            explanation: 'Từ ngữ thể hiện đúng tinh thần bài đọc.',
-            skillTag: 'tu_trong_ngu_canh',
-            difficulty: 'nhan_biet'
-          }, qIdx));
-        } else if (qType === 'sequence') {
-          draft.questions.push(sanitizeQuestionData({
-            id: `q${qIdx + 1}`,
-            type: 'sequence',
-            prompt: 'Sắp xếp các sự việc sau theo đúng thứ tự diễn ra trong bài đọc:',
-            items: ['Sự việc mở đầu', 'Sự việc diễn biến', 'Sự việc kết thúc'],
-            answer: ['Sự việc mở đầu', 'Sự việc diễn biến', 'Sự việc kết thúc'],
-            hint: 'Em hãy xem sự việc nào xảy ra trước, sự việc nào xảy ra sau nhé.',
-            explanation: 'Trình tự thời gian được thể hiện lần lượt từ đầu đến cuối câu chuyện.',
-            skillTag: 'sap_xep_trinh_tu',
-            difficulty: 'thong_hieu'
-          }, qIdx));
-        } else {
-          draft.questions.push(sanitizeQuestionData({
-            id: `q${qIdx + 1}`,
-            type: 'multiple_choice',
-            prompt: `Ý nghĩa chính của bài đọc "${draft.title || 'này'}" là gì?`,
-            options: [
-              'Khuyên em biết yêu quý và bảo vệ thiên nhiên',
-              'Nhắc nhở em luôn vâng lời thầy cô và cha mẹ',
-              'Giúp em thêm yêu vẻ đẹp quê hương đất nước'
-            ],
-            answer: 'A',
-            hint: 'Em hãy đọc lại phần kết thúc bài đọc để tìm ý nghĩa nhé.',
-            explanation: 'Bài đọc gửi gắm bài học gần gũi với lứa tuổi tiểu học.',
-            skillTag: 'noi_dung_chinh',
-            difficulty: 'thong_hieu'
-          }, qIdx));
+        missingTypes.push(activeTypes[(draft.questions.length + i) % activeTypes.length]);
+      }
+
+      let supplementQuestions: any[] = [];
+      try {
+        const suppPrompt = `Dựa vào bài đọc sau đây:\n"${draft.passage}"\n\nHãy tạo thêm đúng ${missingCount} câu hỏi đọc hiểu chuẩn GDPT 2018 cho học sinh lớp ${grade}. Các dạng câu hỏi cần tạo lần lượt là: [${missingTypes.join(', ')}].\nTrả về JSON dạng: { "questions": [ ... ] } với đầy đủ thuộc tính id, type, prompt, answer (đáp án đúng), options (nếu là trắc nghiệm), statement (nếu là đúng sai), items (nếu là sắp xếp), leftItems, rightItems, matchingPairs (nếu là ghép đôi), blankContext (nếu là điền khuyết với chỗ trống [ ... ]), hint, explanation, difficulty, skillTag. Tuyệt đối không dùng chữ mẫu placeholder như "Chi tiết 1" hay "Nội dung 1".`;
+        const suppRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${usedModel}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: suppPrompt }] }],
+              generationConfig: { responseMimeType: 'application/json' }
+            })
+          }
+        );
+        if (suppRes.ok) {
+          const suppData: any = await suppRes.json();
+          const suppText = suppData.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (suppText) {
+            const parsed = JSON.parse(suppText);
+            if (Array.isArray(parsed.questions)) {
+              supplementQuestions = parsed.questions;
+            }
+          }
+        }
+      } catch (suppErr) {
+        console.warn('[Gemini AI] Supplement generation error:', suppErr);
+      }
+
+      if (supplementQuestions.length > 0) {
+        for (const sq of supplementQuestions) {
+          if (draft.questions.length < totalQuestions) {
+            draft.questions.push(sanitizeQuestionData(sq, draft.questions.length));
+          }
+        }
+      }
+
+      // If still missing after AI supplement, extract directly from draft.passage and draft.vocabulary
+      if (draft.questions.length < totalQuestions) {
+        const sentences = draft.passage.split(/(?<=[.?!])\s+/).filter((s: string) => s.trim().length > 10);
+        const vocabList = Array.isArray(draft.vocabulary) ? draft.vocabulary : [];
+
+        while (draft.questions.length < totalQuestions) {
+          const qIdx = draft.questions.length;
+          const qType = activeTypes[qIdx % activeTypes.length];
+          const sampleSentence = sentences[qIdx % sentences.length] || draft.passage.slice(0, 80);
+
+          if (qType === 'matching' && vocabList.length >= 3) {
+            const lefts = vocabList.slice(0, 3).map((v: any) => v.word || 'từ');
+            const rights = vocabList.slice(0, 3).map((v: any) => v.meaning || 'nghĩa');
+            const pairs: Record<string, string> = {};
+            lefts.forEach((l: string, i: number) => { pairs[l] = rights[i]; });
+            draft.questions.push(sanitizeQuestionData({
+              id: `q${qIdx + 1}`,
+              type: 'matching',
+              prompt: 'Nối từ ngữ ở cột trái với ý nghĩa phù hợp ở cột phải theo bài đọc:',
+              leftItems: lefts,
+              rightItems: rights,
+              matchingPairs: pairs,
+              answer: pairs,
+              hint: 'Em hãy đọc lại phần từ ngữ trong bài đọc để ghép đúng nghĩa nhé.',
+              explanation: 'Các từ ngữ được giải nghĩa chính xác theo ngữ cảnh bài học.',
+              skillTag: 'tu_trong_ngu_canh',
+              difficulty: 'thong_hieu'
+            }, qIdx));
+          } else if (qType === 'fill_blank') {
+            const words = sampleSentence.split(/\s+/).filter((w: string) => w.length > 2 && !['những', 'các', 'trong', 'được'].includes(w.toLowerCase()));
+            const targetWord = words[Math.floor(words.length / 2)] || 'bài học';
+            const blankContext = sampleSentence.replace(targetWord, '[ ... ]');
+            draft.questions.push(sanitizeQuestionData({
+              id: `q${qIdx + 1}`,
+              type: 'fill_blank',
+              prompt: 'Em hãy tìm từ ngữ thích hợp trong bài để điền vào chỗ trống:',
+              blankContext,
+              answer: targetWord.replace(/[.,!?;:"'«»()\[\]{}]+$/g, ''),
+              acceptedAnswers: [targetWord.replace(/[.,!?;:"'«»()\[\]{}]+$/g, '')],
+              hint: `Đọc lại câu văn: "${sampleSentence}" để tìm từ còn thiếu.`,
+              explanation: `Từ ngữ đúng theo bài đọc là "${targetWord}".`,
+              skillTag: 'tu_trong_ngu_canh',
+              difficulty: 'nhan_biet'
+            }, qIdx));
+          } else if (qType === 'true_false') {
+            draft.questions.push(sanitizeQuestionData({
+              id: `q${qIdx + 1}`,
+              type: 'true_false',
+              prompt: `Theo bài đọc, nhận định sau Đúng hay Sai?`,
+              statement: sampleSentence.replace(/[.,!?;:"'«»()\[\]{}]+$/g, ''),
+              answer: true,
+              hint: 'Em hãy đối chiếu nhận định này với bài đọc nhé.',
+              explanation: `Nội dung này được nêu rõ trong bài đọc: "${sampleSentence}".`,
+              skillTag: 'thong_tin_truc_tiep',
+              difficulty: 'nhan_biet'
+            }, qIdx));
+          } else if (qType === 'sequence' && sentences.length >= 3) {
+            const items = sentences.slice(0, 3).map((s: string) => s.replace(/[.,!?;:"'«»()\[\]{}]+$/g, '').trim());
+            draft.questions.push(sanitizeQuestionData({
+              id: `q${qIdx + 1}`,
+              type: 'sequence',
+              prompt: 'Sắp xếp các sự việc sau theo đúng thứ tự diễn ra trong bài đọc:',
+              items,
+              answer: [...items],
+              hint: 'Em hãy đọc từ đầu đến cuối bài để xem sự việc nào diễn ra trước.',
+              explanation: 'Các sự việc diễn ra theo trình tự tự nhiên của câu chuyện.',
+              skillTag: 'sap_xep_trinh_tu',
+              difficulty: 'thong_hieu'
+            }, qIdx));
+          } else {
+            draft.questions.push(sanitizeQuestionData({
+              id: `q${qIdx + 1}`,
+              type: 'multiple_choice',
+              prompt: `Chi tiết nào sau đây được nhắc đến trong bài đọc "${draft.title || 'bài đọc'}"?`,
+              options: [
+                sampleSentence.replace(/[.,!?;:"'«»()\[\]{}]+$/g, '').trim(),
+                'Chi tiết không xuất hiện trong câu chuyện',
+                'Một sự việc hoàn toàn khác với bài đọc'
+              ],
+              answer: 'A',
+              hint: `Em hãy tìm câu văn liên quan trong bài đọc: "${sampleSentence}".`,
+              explanation: `Chi tiết này xuất hiện trực tiếp trong bài đọc.`,
+              skillTag: 'thong_tin_truc_tiep',
+              difficulty: 'nhan_biet'
+            }, qIdx));
+          }
         }
       }
     }

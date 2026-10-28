@@ -34,7 +34,8 @@ import {
   RemediationActivityType,
   REMEDIATION_ACTIVITY_LABELS,
   checkAnswerCorrectness,
-  cleanOptionText
+  cleanOptionText,
+  validateSingleQuestion
 } from '@emytv/shared';
 import {
   ResponsiveContainer,
@@ -246,6 +247,7 @@ export const TeacherDashboard: React.FC = () => {
   const [lessonFilterSemester, setLessonFilterSemester] = useState<'all' | 1 | 2>('all');
   const [lessonFilterStatus, setLessonFilterStatus] = useState<'all' | 'published' | 'draft' | 'archived'>('all');
   const [lessonSearch, setLessonSearch] = useState('');
+  const [lessonsError, setLessonsError] = useState<string | null>(null);
 
   // Step-by-Step Navigation for Lesson Library (Module 2: NĂM HỌC -> KHỐI -> HỌC KỲ -> TUẦN -> BÀI ĐỌC)
   const [navLessonYear, setNavLessonYear] = useState<string | null>(null);
@@ -471,6 +473,7 @@ export const TeacherDashboard: React.FC = () => {
           const lRes: any = await getLessonsFunc({ status: 'all' });
           if (lRes.data?.success && Array.isArray(lRes.data.lessons)) {
             setLessons(lRes.data.lessons);
+            setLessonsError(null);
           } else {
             throw new Error('Invalid response');
           }
@@ -485,8 +488,10 @@ export const TeacherDashboard: React.FC = () => {
             const lessonList: Lesson[] = [];
             snapLessons.forEach((d) => lessonList.push(d.data() as Lesson));
             setLessons(lessonList);
-          } catch (lsErr) {
+            setLessonsError(null);
+          } catch (lsErr: any) {
             console.warn('Firestore direct query for lessons failed:', lsErr);
+            setLessonsError('Không thể kết nối đến máy chủ để tải danh sách bài đọc. Vui lòng kiểm tra kết nối mạng hoặc thử lại.');
           }
         }
       }
@@ -814,21 +819,29 @@ export const TeacherDashboard: React.FC = () => {
     setNavLessonGrade(null);
     setNavLessonSemester(null);
     setNavLessonWeek(null);
+    setLessonFilterStatus('all');
+    setLessonSearch('');
   };
 
   const handleSelectLessonGrade = (grade: Grade) => {
     setNavLessonGrade(grade);
     setNavLessonSemester(null);
     setNavLessonWeek(null);
+    setLessonFilterStatus('all');
+    setLessonSearch('');
   };
 
   const handleSelectLessonSemester = (sem: 1 | 2) => {
     setNavLessonSemester(sem);
     setNavLessonWeek(null);
+    setLessonFilterStatus('all');
+    setLessonSearch('');
   };
 
   const handleSelectLessonWeek = (week: number | 'all') => {
     setNavLessonWeek(week);
+    setLessonFilterStatus('all');
+    setLessonSearch('');
   };
 
   const handleBackToLessonYears = () => {
@@ -836,21 +849,29 @@ export const TeacherDashboard: React.FC = () => {
     setNavLessonGrade(null);
     setNavLessonSemester(null);
     setNavLessonWeek(null);
+    setLessonFilterStatus('all');
+    setLessonSearch('');
   };
 
   const handleBackToLessonGrades = () => {
     setNavLessonGrade(null);
     setNavLessonSemester(null);
     setNavLessonWeek(null);
+    setLessonFilterStatus('all');
+    setLessonSearch('');
   };
 
   const handleBackToLessonSemesters = () => {
     setNavLessonSemester(null);
     setNavLessonWeek(null);
+    setLessonFilterStatus('all');
+    setLessonSearch('');
   };
 
   const handleBackToLessonWeeks = () => {
     setNavLessonWeek(null);
+    setLessonFilterStatus('all');
+    setLessonSearch('');
   };
 
   // Create Student Access Code Handler
@@ -1376,6 +1397,17 @@ export const TeacherDashboard: React.FC = () => {
       alert('Bài đọc cần tối thiểu 1 câu hỏi để xuất bản.');
       return;
     }
+
+    // Gate 2: Pre-publish validation check on all questions
+    for (let i = 0; i < draftLesson.questions.length; i++) {
+      const q = draftLesson.questions[i];
+      const val = validateSingleQuestion(q, i);
+      if (!val.valid) {
+        alert(`Không thể xuất bản bài đọc vì câu hỏi chưa đạt yêu cầu:\n\n• ${val.errors.join('\n• ')}\n\nThầy cô vui lòng kiểm tra và hoàn thiện câu hỏi trước khi xuất bản.`);
+        return;
+      }
+    }
+
     setPublishing(true);
     try {
       const publishFunc = httpsCallable(functions, 'publishLesson');
@@ -1476,10 +1508,10 @@ export const TeacherDashboard: React.FC = () => {
               answer: privateInfo?.answer !== undefined
                 ? privateInfo.answer
                 : (pq.type === 'matching'
-                    ? (privateInfo?.matchingPairs || {})
+                    ? (privateInfo?.matchingPairs || undefined)
                     : pq.type === 'fill_blank'
-                    ? (privateInfo?.acceptedAnswers?.[0] || '')
-                    : pq.options ? 'A' : (pq.type === 'true_false' ? true : (pq.items || []))),
+                    ? (privateInfo?.acceptedAnswers?.[0] || undefined)
+                    : undefined),
               hint: privateInfo?.hint || pq.hint || '',
               explanation: privateInfo?.explanation || '',
               skillTag: pq.skillTag || 'thong_tin_truc_tiep',
@@ -6059,8 +6091,66 @@ export const TeacherDashboard: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Lesson Cards Grid */}
-                {displayedLessons.length > 0 ? (
+                {/* Active Filter Indicator Tag */}
+                {(lessonFilterStatus !== 'all' || lessonSearch.trim()) && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs font-bold text-amber-900 animate-fade-in shadow-xs">
+                    <div className="flex items-center gap-2">
+                      <Filter className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>
+                        Đang lọc: {lessonFilterStatus !== 'all' ? (lessonFilterStatus === 'published' ? 'Đã xuất bản' : lessonFilterStatus === 'draft' ? 'Bản nháp' : 'Lưu trữ') : ''}
+                        {lessonFilterStatus !== 'all' && lessonSearch.trim() ? ' · ' : ''}
+                        {lessonSearch.trim() ? `Từ khóa: "${lessonSearch}"` : ''}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLessonFilterStatus('all');
+                        setLessonSearch('');
+                      }}
+                      className="px-3 py-1 bg-amber-200 hover:bg-amber-300 text-amber-950 font-black rounded-xl transition cursor-pointer text-xs flex items-center gap-1 shadow-xs"
+                      title="Xóa toàn bộ bộ lọc để hiển thị tất cả bài đọc"
+                    >
+                      <span>Xóa bộ lọc</span>
+                      <span>✕</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* Lesson Cards Grid with 3 Distinct States */}
+                {loading ? (
+                  // State A: Đang tải dữ liệu
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {[1, 2, 3].map((n) => (
+                      <div key={n} className="bg-white rounded-3xl p-6 border border-slate-200 animate-pulse space-y-4">
+                        <div className="flex justify-between items-center">
+                          <div className="h-6 bg-slate-100 rounded-full w-1/3" />
+                          <div className="h-6 bg-slate-100 rounded-full w-1/4" />
+                        </div>
+                        <div className="h-5 bg-slate-100 rounded-lg w-3/4" />
+                        <div className="h-3 bg-slate-100 rounded w-1/2" />
+                        <div className="h-16 bg-slate-50 rounded-2xl border border-slate-100" />
+                        <div className="h-10 bg-slate-100 rounded-xl" />
+                      </div>
+                    ))}
+                  </div>
+                ) : lessonsError ? (
+                  // State C: Tải thất bại do API/Firebase
+                  <div className="p-12 text-center bg-rose-50 rounded-3xl border border-rose-200">
+                    <AlertCircle className="w-12 h-12 text-rose-500 mx-auto mb-3" />
+                    <h4 className="font-black text-rose-900 text-base">Tải danh sách bài đọc thất bại</h4>
+                    <p className="text-xs text-rose-700 mt-1 max-w-md mx-auto">{lessonsError}</p>
+                    <button
+                      type="button"
+                      onClick={() => loadDashboardData()}
+                      className="mt-4 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow transition cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Thử tải lại bài đọc</span>
+                    </button>
+                  </div>
+                ) : displayedLessons.length > 0 ? (
+                  // State B.1: Tải thành công & có bài đọc
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {displayedLessons.map((ls) => {
                       const status = ls.status || 'published';
@@ -6304,12 +6394,55 @@ export const TeacherDashboard: React.FC = () => {
                     })}
                   </div>
                 ) : (
-                  <div className="p-12 text-center bg-white rounded-3xl border border-slate-200">
+                  // State B.2: Tải thành công nhưng danh sách trống
+                  <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 shadow-xs">
                     <BookOpen className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                    <h4 className="font-bold text-slate-700">Không tìm thấy bài đọc nào phù hợp trong tuần/học kỳ này</h4>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Thử đổi từ khóa tìm kiếm hoặc chọn tuần khác.
-                    </p>
+                    {lessonFilterStatus !== 'all' || lessonSearch.trim() ? (
+                      <>
+                        <h4 className="font-extrabold text-slate-900 text-base">
+                          Không có bài đọc phù hợp với bộ lọc hiện tại
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-1.5 max-w-md mx-auto leading-relaxed">
+                          Không tìm thấy bài đọc nào phù hợp với bộ lọc trạng thái "{lessonFilterStatus === 'published' ? 'Đã xuất bản' : lessonFilterStatus === 'draft' ? 'Bản nháp' : 'Lưu trữ'}"
+                          {lessonSearch.trim() ? ` hoặc từ khóa tìm kiếm "${lessonSearch}"` : ''}.
+                        </p>
+                        <div className="mt-5 flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLessonFilterStatus('all');
+                              setLessonSearch('');
+                            }}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition cursor-pointer flex items-center gap-1.5"
+                          >
+                            <Filter className="w-3.5 h-3.5" />
+                            <span>Xóa bộ lọc (Xem tất cả trạng thái)</span>
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <h4 className="font-bold text-slate-700 text-base">
+                          Chưa có bài đọc nào trong tuần này
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-1.5 max-w-md mx-auto">
+                          Thầy cô có thể tự tạo bài đọc mới hoặc dùng AI tạo nhanh bài đọc chuẩn chương trình GDPT 2018.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDraftLesson(null);
+                            setCurrentEditingLessonId(null);
+                            setIsEditingDraft(false);
+                            setActiveTab('authoring');
+                          }}
+                          className="mt-5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition cursor-pointer inline-flex items-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Soạn bài đọc mới cho tuần này</span>
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

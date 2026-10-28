@@ -300,19 +300,7 @@ export function checkAnswerCorrectness(
       const sNorm = cleanMatchingText(studentRight);
       const rNorm = cleanMatchingText(rightVal);
       if (sNorm !== rNorm) {
-        if (sNorm.length > 5 && rNorm.length > 5) {
-          if (!sNorm.includes(rNorm) && !rNorm.includes(sNorm)) {
-            const sTokens = sNorm.split(' ').filter((t: string) => t.length > 1 && !['như', 'lời', 'của', 'và'].includes(t));
-            const rTokens = rNorm.split(' ').filter((t: string) => t.length > 1 && !['như', 'lời', 'của', 'và'].includes(t));
-            const matches = sTokens.filter((t: string) => rTokens.includes(t));
-            const overlapRatio = matches.length / Math.max(sTokens.length, rTokens.length);
-            if (overlapRatio < 0.6) {
-              return false;
-            }
-          }
-        } else {
-          return false;
-        }
+        return false;
       }
     }
     return true;
@@ -452,12 +440,7 @@ export function sanitizeQuestionData(q: any, idx = 0): any {
         rightItems = Object.values(matchingPairs).map((v) => cleanOptionText(String(v)));
       }
     }
-    if (!matchingPairs && leftItems && rightItems && leftItems.length === rightItems.length) {
-      matchingPairs = {};
-      for (let i = 0; i < leftItems.length; i++) {
-        matchingPairs[leftItems[i]] = rightItems[i];
-      }
-    }
+    // Do NOT automatically pair by array index if matchingPairs is missing!
   }
 
   // Fill in the Blank
@@ -474,35 +457,35 @@ export function sanitizeQuestionData(q: any, idx = 0): any {
     if (primaryAns && !list.some((a: string) => normalizeBlankText(a) === normalizeBlankText(primaryAns))) {
       list.unshift(primaryAns);
     }
-    acceptedAnswers = list.length > 0 ? list : [primaryAns || 'từ cần điền'];
+    acceptedAnswers = list.length > 0 ? list : (primaryAns ? [primaryAns] : undefined);
   }
 
-  // Canonicalize answer
+  // Canonicalize answer - DO NOT GUESS OR DEFAULT MISSING ANSWERS
   let answer = q.correctAnswer !== undefined ? q.correctAnswer : q.answer;
   if (type === 'multiple_choice') {
     const idx = normalizeMcqAnswerToIndex(answer, options);
-    if (idx !== null && idx >= 0 && idx < 3) {
+    if (idx !== null && idx >= 0 && idx < (options?.length || 3)) {
       answer = String.fromCharCode(65 + idx);
     } else {
-      answer = 'A';
+      answer = undefined;
     }
   } else if (type === 'true_false') {
     const bool = normalizeBooleanAnswer(answer);
-    answer = bool !== null ? bool : true;
+    answer = bool !== null ? bool : undefined;
   } else if (type === 'sequence') {
-    if (Array.isArray(answer)) {
+    if (Array.isArray(answer) && answer.length >= 3) {
       if (typeof answer[0] === 'number' && items.length >= 3) {
         answer = answer.map((i: number) => items[i] || items[0]);
       } else {
         answer = answer.map((it: any) => cleanOptionText(String(it)));
       }
-    } else if (items.length >= 3) {
-      answer = [...items];
+    } else {
+      answer = undefined;
     }
   } else if (type === 'matching') {
-    answer = matchingPairs || answer;
+    answer = matchingPairs || (typeof answer === 'object' && !Array.isArray(answer) ? answer : undefined);
   } else if (type === 'fill_blank') {
-    answer = acceptedAnswers?.[0] || String(answer || '').trim();
+    answer = acceptedAnswers?.[0] || (typeof answer === 'string' && answer.trim() ? answer.trim() : undefined);
   }
 
   let hint = String(q.hint || 'Em hãy đọc lại đoạn văn để tìm chi tiết nhé.').trim();
@@ -558,13 +541,20 @@ export function validateQuestionForPublish(q: any, idx = 0): { valid: boolean; e
         errors.push(`${qLabel}: Các phương án trắc nghiệm không được trùng lặp nội dung.`);
       }
     }
-    const ans = String(q.correctAnswer !== undefined ? q.correctAnswer : q.answer).trim().toUpperCase();
-    if (!['A', 'B', 'C'].includes(ans) && typeof q.answer !== 'number') {
-      errors.push(`${qLabel}: Phải chọn đúng 1 đáp án A, B hoặc C.`);
+    const rawAns = q.correctAnswer !== undefined ? q.correctAnswer : q.answer;
+    if (rawAns === undefined || rawAns === null || rawAns === '') {
+      errors.push(`${qLabel}: Câu trắc nghiệm chưa có đáp án đúng (A, B hoặc C).`);
+    } else {
+      const ans = String(rawAns).trim().toUpperCase();
+      if (!['A', 'B', 'C'].includes(ans) && typeof q.answer !== 'number') {
+        errors.push(`${qLabel}: Phải chọn đúng 1 đáp án A, B hoặc C.`);
+      }
     }
   } else if (type === 'true_false') {
     const ans = q.correctAnswer !== undefined ? q.correctAnswer : q.answer;
-    if (typeof ans !== 'boolean' && !['true', 'false', 'đúng', 'sai'].includes(String(ans).toLowerCase())) {
+    if (ans === undefined || ans === null || ans === '') {
+      errors.push(`${qLabel}: Câu Đúng/Sai chưa chọn đáp án đúng (Đúng hoặc Sai).`);
+    } else if (typeof ans !== 'boolean' && !['true', 'false', 'đúng', 'sai'].includes(String(ans).toLowerCase())) {
       errors.push(`${qLabel}: Câu Đúng/Sai phải có đáp án boolean hợp lệ.`);
     }
   } else if (type === 'sequence') {
@@ -573,6 +563,9 @@ export function validateQuestionForPublish(q: any, idx = 0): { valid: boolean; e
     } else {
       if (q.items.some((it: any) => !it || String(it).trim().length === 0)) {
         errors.push(`${qLabel}: Nội dung sự việc trong bài sắp xếp không được để trống.`);
+      }
+      if (q.items.some((it: any) => /Sự việc \d+|Sự việc mở đầu/i.test(String(it)))) {
+        errors.push(`${qLabel}: Bài sắp xếp chứa nội dung mẫu (Sự việc 1, 2...). Thầy cô vui lòng chỉnh sửa nội dung thật.`);
       }
     }
     const ans = q.correctAnswer !== undefined ? q.correctAnswer : q.answer;
@@ -586,16 +579,29 @@ export function validateQuestionForPublish(q: any, idx = 0): { valid: boolean; e
     if (!q.rightItems || !Array.isArray(q.rightItems) || q.rightItems.length < 2) {
       errors.push(`${qLabel}: Bài ghép đôi phải có ít nhất 2 đối tượng ở cột phải.`);
     }
-    const pairs = q.matchingPairs || (typeof q.correctAnswer === 'object' ? q.correctAnswer : q.answer);
-    if (!pairs) {
+    const allItems = [...(q.leftItems || []), ...(q.rightItems || [])];
+    if (allItems.some((it: any) => /Chi tiết \d+|Nội dung tương ứng \d+/i.test(String(it)))) {
+      errors.push(`${qLabel}: Bài ghép đôi chứa nội dung mẫu (Chi tiết 1, Nội dung 1...). Thầy cô vui lòng chỉnh sửa nội dung thật.`);
+    }
+    const pairs = q.matchingPairs || (typeof q.correctAnswer === 'object' && !Array.isArray(q.correctAnswer) ? q.correctAnswer : (typeof q.answer === 'object' && !Array.isArray(q.answer) ? q.answer : null));
+    if (!pairs || typeof pairs !== 'object' || Object.keys(pairs).length === 0) {
       errors.push(`${qLabel}: Bài ghép đôi phải có bảng ánh xạ cặp đáp án đúng.`);
+    } else if (q.leftItems && Object.keys(pairs).length < q.leftItems.length) {
+      errors.push(`${qLabel}: Bài ghép đôi chưa thiết lập đầy đủ các cặp nối đúng cho tất cả các mục ở cột trái.`);
     }
   } else if (type === 'fill_blank') {
     const ans = q.correctAnswer !== undefined ? q.correctAnswer : q.answer;
-    if (!ans || typeof ans !== 'string' || ans.trim().length === 0) {
-      errors.push(`${qLabel}: Bài điền khuyết phải có đáp án chữ chính xác.`);
+    if (!ans || typeof ans !== 'string' || ans.trim().length === 0 || ans.trim() === 'từ cần điền') {
+      errors.push(`${qLabel}: Bài điền khuyết phải có từ đáp án chính xác cần điền.`);
+    }
+    const ctx = (q.blankContext || q.prompt || '').trim();
+    if (!ctx.includes('[') || !ctx.includes(']')) {
+      errors.push(`${qLabel}: Bài điền khuyết phải có câu ngữ cảnh chứa chỗ trống [ ... ].`);
     }
   }
 
   return { valid: errors.length === 0, errors };
 }
+
+export const validateSingleQuestion = validateQuestionForPublish;
+
