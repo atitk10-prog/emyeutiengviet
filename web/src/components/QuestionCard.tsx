@@ -93,8 +93,15 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     return null;
   });
 
-  // State for tap-to-match interaction (Matching question)
+  // State for tap-to-match & touch interaction (Matching question)
   const [activeLeftItem, setActiveLeftItem] = useState<string | null>(null);
+  const [activeRightItem, setActiveRightItem] = useState<string | null>(null);
+  const [shuffledRightItems, setShuffledRightItems] = useState<string[]>(() => {
+    if (question.type === 'matching' && question.rightItems && question.rightItems.length > 1) {
+      return [...question.rightItems.slice(1), question.rightItems[0]];
+    }
+    return question.rightItems || [];
+  });
 
   // Drag and drop state for Sequence
   const [draggedSeqIdx, setDraggedSeqIdx] = useState<number | null>(null);
@@ -162,6 +169,12 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
       setResult(null);
       setShowHintBox(false);
       setActiveLeftItem(null);
+      setActiveRightItem(null);
+      if (question.type === 'matching' && question.rightItems && question.rightItems.length > 1) {
+        setShuffledRightItems([...question.rightItems.slice(1), question.rightItems[0]]);
+      } else {
+        setShuffledRightItems(question.rightItems || []);
+      }
     }
   }, [question.id, existingResponse]);
 
@@ -179,7 +192,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     if (question.type === 'matching') {
       const leftCount = question.leftItems?.length || 0;
       if (!selectedAnswer || typeof selectedAnswer !== 'object') return false;
-      return Object.keys(selectedAnswer).length >= Math.min(2, leftCount);
+      return leftCount > 0 && Object.keys(selectedAnswer).length === leftCount;
     }
     if (question.type === 'fill_blank') {
       return typeof selectedAnswer === 'string' && selectedAnswer.trim().length > 0;
@@ -247,17 +260,84 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   const handlePairItems = (left: string, right: string) => {
     if (isCompleted || (result && !result.canRetry)) return;
     const current = { ...(selectedAnswer || {}) };
+    // Clear any previous pair involving this left or right item to prevent duplicates
+    Object.keys(current).forEach((k) => {
+      if (k === left || current[k] === right) {
+        delete current[k];
+      }
+    });
     current[left] = right;
     setSelectedAnswer(current);
     setActiveLeftItem(null);
+    setActiveRightItem(null);
   };
 
-  // Unpair a matching pair
+  // Unpair a matching pair by left item
   const handleUnpairLeft = (left: string) => {
     if (isCompleted || (result && !result.canRetry)) return;
     const current = { ...(selectedAnswer || {}) };
     delete current[left];
     setSelectedAnswer(current);
+  };
+
+  // Unpair a matching pair by right item
+  const handleUnpairRight = (right: string) => {
+    if (isCompleted || (result && !result.canRetry)) return;
+    const current = { ...(selectedAnswer || {}) };
+    Object.keys(current).forEach((k) => {
+      if (current[k] === right) delete current[k];
+    });
+    setSelectedAnswer(current);
+  };
+
+  // Reset all matching pairs
+  const handleResetMatching = () => {
+    if (isCompleted || (result && !result.canRetry)) return;
+    setSelectedAnswer({});
+    setActiveLeftItem(null);
+    setActiveRightItem(null);
+  };
+
+  // Tap-to-match handler for Left item
+  const handleTapLeft = (leftText: string) => {
+    if (isCompleted || (result && !result.canRetry)) return;
+    if (activeRightItem) {
+      handlePairItems(leftText, activeRightItem);
+    } else {
+      setActiveLeftItem(activeLeftItem === leftText ? null : leftText);
+      setActiveRightItem(null);
+    }
+  };
+
+  // Tap-to-match handler for Right item
+  const handleTapRight = (rightText: string) => {
+    if (isCompleted || (result && !result.canRetry)) return;
+    if (activeLeftItem) {
+      handlePairItems(activeLeftItem, rightText);
+    } else {
+      setActiveRightItem(activeRightItem === rightText ? null : rightText);
+      setActiveLeftItem(null);
+    }
+  };
+
+  // Touch drag end handler for mobile devices
+  const handleTouchEndMatching = (e: React.TouchEvent, sourceSide: 'left' | 'right', sourceText: string) => {
+    if (isCompleted || (result && !result.canRetry)) return;
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+    const elem = document.elementFromPoint(touch.clientX, touch.clientY);
+    const targetCard = elem?.closest('[data-matching-card]');
+    if (targetCard) {
+      const targetSide = targetCard.getAttribute('data-side');
+      const targetText = targetCard.getAttribute('data-text');
+      if (targetSide && targetText && targetSide !== sourceSide) {
+        if (sourceSide === 'left') {
+          handlePairItems(sourceText, targetText);
+        } else {
+          handlePairItems(targetText, sourceText);
+        }
+      }
+    }
   };
 
   return (
@@ -450,9 +530,21 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
         {/* 4. Matching (Ghép đôi kéo thả + chạm/click để ghép) */}
         {question.type === 'matching' && !isCorrupted && question.leftItems && question.rightItems && (
           <div className="space-y-4 mb-6">
-            <div className="p-3 bg-sky-50/70 border border-sky-200 rounded-2xl text-xs md:text-sm text-sky-900 font-semibold flex items-center gap-2">
-              <Link2 className="w-4 h-4 text-sky-600 shrink-0" />
-              <span>Chạm hoặc kéo từ <strong>Cột A</strong> rồi chọn nội dung tương ứng ở <strong>Cột B</strong> để ghép đôi:</span>
+            <div className="p-3 bg-sky-50/80 border border-sky-200 rounded-2xl flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs md:text-sm text-sky-900 font-semibold">
+                <Link2 className="w-4 h-4 text-sky-600 shrink-0" />
+                <span>Kéo thả hoặc chạm chọn từ <strong>Cột A</strong> rồi chọn ô tương ứng ở <strong>Cột B</strong> để ghép đôi:</span>
+              </div>
+              {!isCompleted && selectedAnswer && Object.keys(selectedAnswer).length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleResetMatching}
+                  className="px-2.5 py-1 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 transition cursor-pointer flex items-center gap-1"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Làm lại tất cả cặp</span>
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -465,20 +557,36 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                   const pairedRight = selectedAnswer?.[leftText];
                   const isPaired = Boolean(pairedRight);
                   const isActive = activeLeftItem === leftText;
+                  const isTargetForRight = Boolean(activeRightItem);
                   const colorTheme = isPaired ? PAIR_COLORS[lIdx % PAIR_COLORS.length] : null;
 
                   return (
                     <div
                       key={lIdx}
+                      data-matching-card="true"
+                      data-side="left"
+                      data-text={leftText}
                       draggable={!isCompleted}
                       onDragStart={(e) => {
+                        if (isCompleted) return;
                         e.dataTransfer.setData('text/plain', leftText);
                         setActiveLeftItem(leftText);
+                        setActiveRightItem(null);
                       }}
-                      onClick={() => !isCompleted && setActiveLeftItem(isActive ? null : leftText)}
-                      className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer relative ${
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (isCompleted) return;
+                        const right = e.dataTransfer.getData('text/plain') || activeRightItem;
+                        if (right) handlePairItems(leftText, right);
+                      }}
+                      onTouchEnd={(e) => handleTouchEndMatching(e, 'left', leftText)}
+                      onClick={() => handleTapLeft(leftText)}
+                      className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer relative select-none ${
                         isActive
                           ? 'border-primary-500 bg-primary-50 ring-2 ring-primary-300 shadow-md'
+                          : isTargetForRight
+                          ? 'bg-purple-50/60 border-purple-300 hover:border-purple-500 animate-pulse'
                           : isPaired
                           ? `${colorTheme?.bg} ${colorTheme?.border} shadow-sm`
                           : 'bg-white border-slate-200 hover:border-sky-300 hover:bg-sky-50/30'
@@ -500,8 +608,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                               e.stopPropagation();
                               handleUnpairLeft(leftText);
                             }}
-                            className="p-1 rounded-lg hover:bg-rose-100 text-slate-400 hover:text-rose-600 transition"
-                            title="Hủy ghép đôi"
+                            className="p-1 rounded-lg hover:bg-rose-100 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                            title="Hủy cặp này"
                           >
                             <X className="w-4 h-4" />
                           </button>
@@ -523,45 +631,77 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">
                   Cột B (Nghĩa / Nội dung)
                 </span>
-                {question.rightItems.map((rightText, rIdx) => {
-                  // Find which left item (if any) is paired with this right item
+                {(shuffledRightItems.length > 0 ? shuffledRightItems : question.rightItems).map((rightText, rIdx) => {
                   const pairedLeft = selectedAnswer
                     ? Object.keys(selectedAnswer).find((k) => selectedAnswer[k] === rightText)
                     : null;
                   const isPaired = Boolean(pairedLeft);
+                  const isActive = activeRightItem === rightText;
+                  const isTargetForLeft = Boolean(activeLeftItem);
                   const lIdx = pairedLeft ? question.leftItems?.indexOf(pairedLeft) ?? -1 : -1;
                   const colorTheme = isPaired && lIdx >= 0 ? PAIR_COLORS[lIdx % PAIR_COLORS.length] : null;
 
                   return (
                     <div
                       key={rIdx}
+                      data-matching-card="true"
+                      data-side="right"
+                      data-text={rightText}
+                      draggable={!isCompleted}
+                      onDragStart={(e) => {
+                        if (isCompleted) return;
+                        e.dataTransfer.setData('text/plain', rightText);
+                        setActiveRightItem(rightText);
+                        setActiveLeftItem(null);
+                      }}
                       onDragOver={(e) => e.preventDefault()}
                       onDrop={(e) => {
                         e.preventDefault();
+                        if (isCompleted) return;
                         const left = e.dataTransfer.getData('text/plain') || activeLeftItem;
                         if (left) handlePairItems(left, rightText);
                       }}
-                      onClick={() => {
-                        if (activeLeftItem) {
-                          handlePairItems(activeLeftItem, rightText);
-                        }
-                      }}
-                      className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer relative ${
-                        isPaired
-                          ? `${colorTheme?.bg} ${colorTheme?.border} shadow-sm`
-                          : activeLeftItem
+                      onTouchEnd={(e) => handleTouchEndMatching(e, 'right', rightText)}
+                      onClick={() => handleTapRight(rightText)}
+                      className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer relative select-none ${
+                        isActive
+                          ? 'border-purple-500 bg-purple-50 ring-2 ring-purple-300 shadow-md'
+                          : isTargetForLeft
                           ? 'bg-amber-50/60 border-amber-300 hover:border-amber-500 animate-pulse'
+                          : isPaired
+                          ? `${colorTheme?.bg} ${colorTheme?.border} shadow-sm`
                           : 'bg-white border-slate-200 hover:border-slate-300'
                       }`}
                     >
-                      <div className="flex items-center gap-2.5">
-                        <span className={`w-6 h-6 rounded-full text-xs font-black flex items-center justify-center shrink-0 ${isPaired ? `${colorTheme?.badge} text-white` : 'bg-slate-100 text-slate-600'}`}>
-                          {String.fromCharCode(65 + rIdx)}
-                        </span>
-                        <span className="font-semibold text-sm md:text-base text-slate-800 flex-1">
-                          {cleanOptionText(rightText)}
-                        </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5 flex-1">
+                          <span className={`w-6 h-6 rounded-full text-xs font-black flex items-center justify-center shrink-0 ${isPaired ? `${colorTheme?.badge} text-white` : 'bg-slate-100 text-slate-600'}`}>
+                            {String.fromCharCode(65 + rIdx)}
+                          </span>
+                          <span className="font-semibold text-sm md:text-base text-slate-800 flex-1">
+                            {cleanOptionText(rightText)}
+                          </span>
+                        </div>
+                        {isPaired && !isCompleted && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleUnpairRight(rightText);
+                            }}
+                            className="p-1 rounded-lg hover:bg-rose-100 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                            title="Hủy cặp này"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
+                      {isPaired && pairedLeft && (
+                        <div className="mt-2 text-xs font-semibold text-slate-600 bg-white/80 p-1.5 rounded-lg border border-slate-200 flex items-center gap-1.5 truncate">
+                          <Link2 className="w-3.5 h-3.5 text-primary-600 shrink-0" />
+                          <span className="truncate">Nối từ: <strong>{cleanOptionText(pairedLeft)}</strong></span>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

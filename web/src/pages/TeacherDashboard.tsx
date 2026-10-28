@@ -313,7 +313,18 @@ export const TeacherDashboard: React.FC = () => {
   const [previewUserAnswers, setPreviewUserAnswers] = useState<Record<string, any>>({});
   const [previewShowHint, setPreviewShowHint] = useState<Record<string, boolean>>({});
   const [previewFontSize, setPreviewFontSize] = useState<'base' | 'lg' | 'xl' | '2xl'>('lg');
+  const [previewMatchingActiveLeft, setPreviewMatchingActiveLeft] = useState<string | null>(null);
   const previewCacheRef = useRef<Map<string, any>>(new Map());
+
+  // Assignment Progress Tracking (Nhiệm vụ 3: XEM TIẾN ĐỘ LÀM BÀI)
+  const [viewingProgressAssignment, setViewingProgressAssignment] = useState<any | null>(null);
+  const [loadingProgress, setLoadingProgress] = useState<boolean>(false);
+  const [progressData, setProgressData] = useState<any | null>(null);
+  const [progressSearch, setProgressSearch] = useState<string>('');
+  const [progressStatusFilter, setProgressStatusFilter] = useState<'all' | 'completed' | 'in_progress' | 'not_started'>('all');
+  const [studentDetailAttemptId, setStudentDetailAttemptId] = useState<string | null>(null);
+  const [studentDetailData, setStudentDetailData] = useState<any | null>(null);
+  const [loadingStudentDetail, setLoadingStudentDetail] = useState<boolean>(false);
 
   // Remediation & Pedagogical Activity Center (Module 4: NĂM HỌC → KHỐI → LỚP → PHẠM VI PHÂN TÍCH)
   const [remedNavYear, setRemedNavYear] = useState<string | null>(null);
@@ -1104,6 +1115,63 @@ export const TeacherDashboard: React.FC = () => {
     }
   };
 
+  // View Assignment Progress Handler (Nhiệm vụ 3: XEM TIẾN ĐỘ LÀM BÀI)
+  const handleViewAssignmentProgress = async (asg: any) => {
+    const asgId = asg.id || asg.assignmentId;
+    if (!asgId) {
+      alert('Không tìm thấy mã bài giao.');
+      return;
+    }
+    setViewingProgressAssignment({ ...asg, id: asgId });
+    setLoadingProgress(true);
+    setProgressData(null);
+    setProgressSearch('');
+    setProgressStatusFilter('all');
+    try {
+      const getProgress = httpsCallable(functions, 'getAssignmentProgress');
+      const res: any = await getProgress({ assignmentId: asgId });
+      if (res.data?.success) {
+        setProgressData(res.data);
+      } else {
+        alert('Không thể tải tiến độ bài làm: ' + (res.data?.error || 'Lỗi không xác định'));
+      }
+    } catch (err: any) {
+      console.error('Error fetching assignment progress:', err);
+      alert('Lỗi tải tiến độ bài làm: ' + err.message);
+    } finally {
+      setLoadingProgress(false);
+    }
+  };
+
+  // View Student Detailed Attempt Handler (Nhiệm vụ 3.C: Chi tiết bài làm)
+  const handleViewStudentAttemptDetail = async (attemptId: string, studentId: string) => {
+    if (!attemptId) {
+      alert('Học sinh chưa có bài làm để xem chi tiết.');
+      return;
+    }
+    setStudentDetailAttemptId(attemptId);
+    setLoadingStudentDetail(true);
+    setStudentDetailData(null);
+    try {
+      const getDetail = httpsCallable(functions, 'getStudentAttemptDetail');
+      const res: any = await getDetail({
+        attemptId,
+        assignmentId: viewingProgressAssignment?.id,
+        studentId
+      });
+      if (res.data?.success) {
+        setStudentDetailData(res.data);
+      } else {
+        alert('Không thể tải chi tiết bài làm: ' + (res.data?.error || 'Lỗi không xác định'));
+      }
+    } catch (err: any) {
+      console.error('Error fetching student attempt detail:', err);
+      alert('Lỗi tải chi tiết bài làm: ' + err.message);
+    } finally {
+      setLoadingStudentDetail(false);
+    }
+  };
+
   // Copy Class Code Handler
   const handleCopyClassCode = (code: string) => {
     navigator.clipboard.writeText(code);
@@ -1347,7 +1415,7 @@ export const TeacherDashboard: React.FC = () => {
           answer: direct.correctAnswer !== undefined ? direct.correctAnswer : direct.answer,
           hint: direct.hint || '',
           explanation: direct.explanation || '',
-          matchingPairs: direct.matchingPairs || (typeof direct.answer === 'object' && !Array.isArray(direct.answer) ? direct.answer : undefined),
+          matchingPairs: direct.matchingPairs || (typeof direct.correctAnswer === 'object' && !Array.isArray(direct.correctAnswer) ? direct.correctAnswer : (typeof direct.answer === 'object' && !Array.isArray(direct.answer) ? direct.answer : undefined)),
           acceptedAnswers: direct.acceptedAnswers || []
         };
       }
@@ -1359,7 +1427,7 @@ export const TeacherDashboard: React.FC = () => {
           answer: found.correctAnswer !== undefined ? found.correctAnswer : found.answer,
           hint: found.hint || '',
           explanation: found.explanation || '',
-          matchingPairs: found.matchingPairs || (typeof found.answer === 'object' && !Array.isArray(found.answer) ? found.answer : undefined),
+          matchingPairs: found.matchingPairs || (typeof found.correctAnswer === 'object' && !Array.isArray(found.correctAnswer) ? found.correctAnswer : (typeof found.answer === 'object' && !Array.isArray(found.answer) ? found.answer : undefined)),
           acceptedAnswers: found.acceptedAnswers || []
         };
       }
@@ -5998,7 +6066,9 @@ export const TeacherDashboard: React.FC = () => {
                       const status = ls.status || 'published';
                       const versionNum = ls.currentVersionNumber || 1;
                       const assignedCount = ls.assignedClassCount || 0;
-                      const qCount = ls.totalQuestions || 5;
+                      const qCount = ls.totalQuestions ?? (ls as any).questionCount ?? (ls.draftData?.questions?.length) ?? 0;
+                      const draftCount = (ls as any).draftQuestionCount !== undefined ? (ls as any).draftQuestionCount : (ls.draftData?.questions?.length);
+                      const hasDraftDiff = status === 'published' && draftCount !== undefined && draftCount !== qCount;
 
                       return (
                         <div
@@ -6094,8 +6164,13 @@ export const TeacherDashboard: React.FC = () => {
                             <div className="space-y-2 mb-4">
                               <div className="flex flex-wrap items-center gap-2">
                                 <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold">
-                                  {qCount} câu hỏi
+                                  {qCount > 0 ? `${qCount} câu hỏi` : 'Chưa có câu hỏi'}
                                 </span>
+                                {hasDraftDiff && (
+                                  <span className="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-300 rounded-lg text-[10px] font-bold" title="Bản nháp hiện tại đang có số câu khác với bản đã xuất bản">
+                                    Nháp: {draftCount} câu (chưa xuất bản)
+                                  </span>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => handleOpenLessonInfo(ls, 'assignments')}
@@ -6115,12 +6190,24 @@ export const TeacherDashboard: React.FC = () => {
                                   {(ls as any).assignedClasses.map((ac: any) => {
                                     const cName = classes.find((c) => c.id === ac.classId)?.name || ac.classId;
                                     return (
-                                      <span
+                                      <button
                                         key={ac.assignmentId || ac.classId}
-                                        className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded text-[10px] font-bold"
+                                        type="button"
+                                        onClick={() => handleViewAssignmentProgress({
+                                          id: ac.assignmentId,
+                                          lessonTitle: ls.title,
+                                          lessonGrade: ls.grade,
+                                          lessonId: ls.id,
+                                          className: cName,
+                                          classId: ac.classId,
+                                          roundName: ac.roundName
+                                        })}
+                                        className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded text-[10px] font-bold transition flex items-center gap-1 cursor-pointer"
+                                        title="Bấm để xem tiến độ làm bài của lớp này"
                                       >
-                                         {cName} ({ac.roundName})
-                                      </span>
+                                        <span>{cName} ({ac.roundName})</span>
+                                        <Eye className="w-2.5 h-2.5 text-emerald-600" />
+                                      </button>
                                     );
                                   })}
                                 </div>
@@ -6571,7 +6658,7 @@ export const TeacherDashboard: React.FC = () => {
                       ) : (
                         <div className="space-y-3">
                           {viewingLessonInfo.assignments.map((asg: any) => (
-                            <div key={asg.id} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between">
+                            <div key={asg.id} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-wrap items-center justify-between gap-3">
                               <div>
                                 <div className="flex items-center gap-2">
                                   <span className="font-extrabold text-sm text-slate-900">
@@ -6588,9 +6675,26 @@ export const TeacherDashboard: React.FC = () => {
                                   Thời gian giao: {asg.createdAt ? new Date(asg.createdAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : 'Gần đây'}
                                 </div>
                               </div>
-                              <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-xl">
-                                Đang mở làm bài
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleViewAssignmentProgress({
+                                      ...asg,
+                                      lessonTitle: viewingLessonInfo.lesson.title,
+                                      lessonGrade: viewingLessonInfo.lesson.grade,
+                                      lessonId: viewingLessonInfo.lesson.id
+                                    });
+                                  }}
+                                  className="px-3.5 py-1.5 bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>Xem tiến độ làm bài</span>
+                                </button>
+                                <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-xl">
+                                  Đang mở
+                                </span>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -7918,11 +8022,14 @@ export const TeacherDashboard: React.FC = () => {
                           <div className="my-2 p-2.5 bg-purple-50/60 rounded-xl border border-purple-200 text-xs">
                             <span className="font-bold text-purple-900 block mb-1">Cặp ghép nối:</span>
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                              {(q.leftItems || []).map((left: string, lIdx: number) => (
-                                <div key={lIdx} className="bg-white p-2 rounded border border-purple-200 text-slate-700">
-                                  <strong className="text-purple-700">{left}</strong> ➔ <span>{q.matchingPairs?.[left] || q.rightItems?.[lIdx] || ''}</span>
-                                </div>
-                              ))}
+                              {(q.leftItems || []).map((left: string, lIdx: number) => {
+                                const paired = q.matchingPairs?.[left] || (typeof q.answer === 'object' && !Array.isArray(q.answer) ? q.answer?.[left] : undefined);
+                                return (
+                                  <div key={lIdx} className="bg-white p-2 rounded border border-purple-200 text-slate-700">
+                                    <strong className="text-purple-700">{left}</strong> ➔ <span>{paired || 'Chưa ghép'}</span>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         )}
@@ -11779,13 +11886,13 @@ export const TeacherDashboard: React.FC = () => {
                               type: 'matching',
                               matchingPairs: currQ.matchingPairs || targetCorrect
                             });
-                            const hasChecked = Boolean(previewUserAnswers[currQ.id]);
+                            const hasChecked = Boolean(previewUserAnswers[currQ.id] && Object.keys(previewUserAnswers[currQ.id]).length > 0);
 
                             return (
                               <div className="space-y-3 pt-1">
-                                <div className="flex items-center justify-between pb-1">
+                                <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
                                   <span className="text-xs font-bold text-purple-900 block">
-                                    Mô phỏng ghép đôi: Chọn ô ở Cột A rồi chọn ô ở Cột B tương ứng:
+                                    Mô phỏng ghép đôi: Bấm chọn ô ở Cột A rồi bấm chọn ô ở Cột B để ghép:
                                   </span>
                                   {hasChecked && (
                                     <span className={`text-xs font-black px-2.5 py-0.5 rounded-full ${
@@ -11797,16 +11904,42 @@ export const TeacherDashboard: React.FC = () => {
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                   <div className="space-y-2">
-                                    <span className="text-xs font-black text-slate-700 uppercase">Cột A:</span>
+                                    <span className="text-xs font-black text-slate-700 uppercase">Cột A (Từ ngữ):</span>
                                     {leftList.map((leftItem, lIdx) => {
                                       const pairedRight = userPairs[leftItem];
+                                      const isActive = previewMatchingActiveLeft === leftItem;
                                       return (
-                                        <div key={lIdx} className="p-2.5 bg-purple-50 rounded-xl border border-purple-200 text-xs font-bold flex items-center justify-between">
+                                        <div
+                                          key={lIdx}
+                                          onClick={() => setPreviewMatchingActiveLeft(isActive ? null : leftItem)}
+                                          className={`p-2.5 rounded-xl border text-xs font-bold transition cursor-pointer flex items-center justify-between gap-2 select-none ${
+                                            isActive
+                                              ? 'bg-purple-100 border-purple-500 ring-2 ring-purple-300 shadow-sm'
+                                              : pairedRight
+                                              ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                                              : 'bg-purple-50 hover:bg-purple-100/70 border-purple-200 text-slate-800'
+                                          }`}
+                                        >
                                           <span>{leftItem}</span>
                                           {pairedRight && (
-                                            <span className="text-[10px] bg-purple-200 text-purple-900 px-2 py-0.5 rounded-full font-bold">
-                                              ➔ {pairedRight}
-                                            </span>
+                                            <div className="flex items-center gap-1.5 shrink-0">
+                                              <span className="text-[10px] bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded-full font-bold">
+                                                ➔ {pairedRight}
+                                              </span>
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  const next = { ...userPairs };
+                                                  delete next[leftItem];
+                                                  setPreviewUserAnswers({ ...previewUserAnswers, [currQ.id]: next });
+                                                }}
+                                                className="p-0.5 hover:bg-rose-100 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer"
+                                                title="Hủy cặp"
+                                              >
+                                                <X className="w-3.5 h-3.5" />
+                                              </button>
+                                            </div>
                                           )}
                                         </div>
                                       );
@@ -11814,22 +11947,53 @@ export const TeacherDashboard: React.FC = () => {
                                   </div>
                                   <div className="space-y-2">
                                     <span className="text-xs font-black text-slate-700 uppercase">Cột B (Lời giải nghĩa):</span>
-                                    {rightList.map((rightItem, rIdx) => (
-                                      <div key={rIdx} className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs font-medium">
-                                        {rightItem}
-                                      </div>
-                                    ))}
+                                    {rightList.map((rightItem, rIdx) => {
+                                      const isPaired = Object.values(userPairs).includes(rightItem);
+                                      return (
+                                        <div
+                                          key={rIdx}
+                                          onClick={() => {
+                                            if (previewMatchingActiveLeft) {
+                                              const next = { ...userPairs, [previewMatchingActiveLeft]: rightItem };
+                                              setPreviewUserAnswers({ ...previewUserAnswers, [currQ.id]: next });
+                                              setPreviewMatchingActiveLeft(null);
+                                            }
+                                          }}
+                                          className={`p-2.5 rounded-xl border text-xs font-medium transition cursor-pointer select-none ${
+                                            previewMatchingActiveLeft
+                                              ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 animate-pulse'
+                                              : isPaired
+                                              ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-semibold'
+                                              : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                                          }`}
+                                        >
+                                          {rightItem}
+                                        </div>
+                                      );
+                                    })}
                                   </div>
                                 </div>
-                                <div className="pt-2 flex justify-end gap-2">
+                                <div className="pt-2 flex flex-wrap items-center justify-end gap-2">
+                                  {Object.keys(userPairs).length > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const next = { ...previewUserAnswers };
+                                        delete next[currQ.id];
+                                        setPreviewUserAnswers(next);
+                                        setPreviewMatchingActiveLeft(null);
+                                      }}
+                                      className="px-3 py-1.5 text-rose-600 hover:bg-rose-50 border border-rose-200 text-xs font-bold rounded-xl transition cursor-pointer"
+                                    >
+                                      Làm lại
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      const canonical: Record<string, string> = {};
-                                      leftList.forEach((l, i) => {
-                                        canonical[l] = rightList[i];
-                                      });
-                                      setPreviewUserAnswers({ ...previewUserAnswers, [currQ.id]: canonical });
+                                      const targetPairs = currQ.matchingPairs || (typeof targetCorrect === 'object' && !Array.isArray(targetCorrect) ? targetCorrect : (typeof currQ.answer === 'object' && !Array.isArray(currQ.answer) ? currQ.answer : {}));
+                                      setPreviewUserAnswers({ ...previewUserAnswers, [currQ.id]: { ...targetPairs } });
+                                      setPreviewMatchingActiveLeft(null);
                                     }}
                                     className="px-3 py-1.5 bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold rounded-xl transition cursor-pointer"
                                   >
@@ -12185,6 +12349,622 @@ export const TeacherDashboard: React.FC = () => {
                 className="flex-1 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-black rounded-xl text-xs transition disabled:opacity-50"
               >
                 {resettingStudentPass ? 'Đang lưu...' : 'Xác nhận Đặt lại'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal: Assignment Progress Tracking (Nhiệm vụ 3: XEM TIẾN ĐỘ LÀM BÀI) */}
+      {viewingProgressAssignment && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="progress-modal-title"
+          className="fixed inset-0 z-[100] overflow-y-auto bg-slate-900/60 backdrop-blur-sm p-3 sm:p-4 md:p-6 flex min-h-full items-center justify-center overscroll-contain animate-fade-in"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setViewingProgressAssignment(null);
+          }}
+        >
+          <div className="relative bg-white rounded-3xl max-w-5xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-auto max-h-[calc(100dvh-2rem)]">
+            {/* Header */}
+            <div className="p-5 md:p-6 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <span className="px-2.5 py-0.5 bg-primary-100 text-primary-800 text-xs font-black rounded-full">
+                    Tiến độ làm bài
+                  </span>
+                  <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-xs font-extrabold rounded-full">
+                    {progressData?.classInfo?.name || viewingProgressAssignment.className || 'Lớp học'}
+                  </span>
+                  <span className="px-2 py-0.5 bg-slate-200 text-slate-700 text-xs font-bold rounded-full">
+                    Khối {progressData?.assignment?.lessonGrade || viewingProgressAssignment.lessonGrade || 2}
+                  </span>
+                  <span className="px-2 py-0.5 bg-purple-100 text-purple-800 text-xs font-bold rounded-full">
+                    Bản giao: v{progressData?.assignment?.lessonVersionNumber || viewingProgressAssignment.lessonVersionNumber || 1}
+                  </span>
+                  {progressData?.assignment?.totalQuestions && (
+                    <span className="px-2 py-0.5 bg-sky-100 text-sky-800 text-xs font-bold rounded-full">
+                      {progressData.assignment.totalQuestions} câu hỏi
+                    </span>
+                  )}
+                </div>
+                <h3 id="progress-modal-title" className="text-xl md:text-2xl font-black text-slate-900 leading-tight">
+                  {progressData?.assignment?.lessonTitle || viewingProgressAssignment.lessonTitle || 'Bài đọc'}
+                </h3>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleViewAssignmentProgress(viewingProgressAssignment)}
+                  disabled={loadingProgress}
+                  className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  title="Tải lại số liệu mới nhất"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingProgress ? 'animate-spin text-primary-600' : ''}`} />
+                  <span>Làm mới</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewingProgressAssignment(null)}
+                  className="p-2 hover:bg-slate-200 text-slate-500 rounded-xl transition cursor-pointer"
+                  title="Đóng cửa sổ"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Content Body */}
+            <div className="p-5 md:p-6 overflow-y-auto overscroll-contain space-y-6">
+              {loadingProgress ? (
+                <div className="py-16 text-center space-y-3">
+                  <Loader2 className="w-9 h-9 text-primary-600 animate-spin mx-auto" />
+                  <p className="text-sm font-bold text-slate-600">Đang đồng bộ tiến độ học sinh từ Firestore...</p>
+                </div>
+              ) : progressData ? (
+                <>
+                  {/* Part A. Thống kê theo lớp */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-black text-base text-slate-900 flex items-center gap-2">
+                        <Users className="w-4 h-4 text-primary-600" />
+                        <span>Thống Kê Tổng Hợp Lớp {progressData.classInfo?.name}</span>
+                      </h4>
+                      {progressData.assignment?.availableUntil && (
+                        <span className="text-xs font-bold text-slate-500 flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Hạn nộp: {new Date(progressData.assignment.availableUntil).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* KPI Cards Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                      <div className="p-4 bg-sky-50 border border-sky-200 rounded-2xl text-center">
+                        <span className="text-[11px] font-bold text-sky-700 uppercase tracking-wider block">Tổng số học sinh</span>
+                        <span className="text-2xl md:text-3xl font-black text-sky-950 mt-1 block">
+                          {progressData.stats?.totalStudents || 0}
+                        </span>
+                        <span className="text-[10px] text-sky-600 font-semibold">Thuộc danh sách lớp</span>
+                      </div>
+
+                      <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-center">
+                        <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider block">Đã hoàn thành</span>
+                        <span className="text-2xl md:text-3xl font-black text-emerald-950 mt-1 block">
+                          {progressData.stats?.completedCount || 0}
+                        </span>
+                        <span className="text-[10px] text-emerald-700 font-bold">
+                          {progressData.stats?.completionRate || 0}% cả lớp
+                        </span>
+                      </div>
+
+                      <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-center">
+                        <span className="text-[11px] font-bold text-amber-700 uppercase tracking-wider block">Đang làm dở</span>
+                        <span className="text-2xl md:text-3xl font-black text-amber-950 mt-1 block">
+                          {progressData.stats?.inProgressCount || 0}
+                        </span>
+                        <span className="text-[10px] text-amber-700 font-semibold">Chưa bấm nộp bài</span>
+                      </div>
+
+                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-center">
+                        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Chưa làm bài</span>
+                        <span className="text-2xl md:text-3xl font-black text-slate-700 mt-1 block">
+                          {progressData.stats?.notStartedCount || 0}
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-semibold">Chưa mở đề</span>
+                      </div>
+
+                      <div className="p-4 bg-purple-50 border border-purple-200 rounded-2xl text-center col-span-2 sm:col-span-1">
+                        <span className="text-[11px] font-bold text-purple-700 uppercase tracking-wider block">Điểm trung bình</span>
+                        <span className="text-2xl md:text-3xl font-black text-purple-950 mt-1 block">
+                          {progressData.stats?.avgScore !== null ? `${progressData.stats.avgScore}` : '—'}
+                        </span>
+                        <span className="text-[10px] text-purple-700 font-semibold">
+                          {progressData.stats?.avgScore !== null ? 'Thang điểm 10' : 'Chưa có bài nộp'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Completion Progress Bar */}
+                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                      <div className="flex justify-between items-center text-xs font-bold text-slate-700">
+                        <span>Tiến trình hoàn thành chung của lớp:</span>
+                        <span className="text-primary-700 font-black text-sm">{progressData.stats?.completionRate || 0}%</span>
+                      </div>
+                      <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex">
+                        <div
+                          className="bg-emerald-500 h-full transition-all duration-500"
+                          style={{ width: `${progressData.stats?.totalStudents ? ((progressData.stats.completedCount / progressData.stats.totalStudents) * 100) : 0}%` }}
+                          title={`Hoàn thành: ${progressData.stats?.completedCount || 0}`}
+                        />
+                        <div
+                          className="bg-amber-400 h-full transition-all duration-500"
+                          style={{ width: `${progressData.stats?.totalStudents ? ((progressData.stats.inProgressCount / progressData.stats.totalStudents) * 100) : 0}%` }}
+                          title={`Đang làm: ${progressData.stats?.inProgressCount || 0}`}
+                        />
+                      </div>
+                      <div className="flex items-center gap-4 text-[11px] font-semibold text-slate-500 pt-1">
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                          <span>Đã nộp bài ({progressData.stats?.completedCount || 0})</span>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
+                          <span>Đang làm ({progressData.stats?.inProgressCount || 0})</span>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-slate-300 inline-block" />
+                          <span>Chưa làm ({progressData.stats?.notStartedCount || 0})</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Part B. Danh sách chi tiết từng học sinh */}
+                  <div className="space-y-4 pt-2 border-t border-slate-200">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <h4 className="font-black text-base text-slate-900 flex items-center gap-2">
+                        <GraduationCap className="w-4 h-4 text-purple-600" />
+                        <span>Danh Sách Học Sinh & Kết Quả Chi Tiết</span>
+                      </h4>
+
+                      {/* Search & Filter */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            placeholder="Tìm tên hoặc mã..."
+                            value={progressSearch}
+                            onChange={(e) => setProgressSearch(e.target.value)}
+                            className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-primary-400 outline-none w-44"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                          <button
+                            type="button"
+                            onClick={() => setProgressStatusFilter('all')}
+                            className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+                              progressStatusFilter === 'all' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            Tất cả ({progressData.students?.length || 0})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setProgressStatusFilter('completed')}
+                            className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+                              progressStatusFilter === 'completed' ? 'bg-emerald-500 text-white shadow-xs' : 'text-slate-600 hover:text-emerald-700'
+                            }`}
+                          >
+                            Hoàn thành ({progressData.stats?.completedCount || 0})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setProgressStatusFilter('in_progress')}
+                            className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+                              progressStatusFilter === 'in_progress' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-600 hover:text-amber-700'
+                            }`}
+                          >
+                            Đang làm ({progressData.stats?.inProgressCount || 0})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setProgressStatusFilter('not_started')}
+                            className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+                              progressStatusFilter === 'not_started' ? 'bg-slate-400 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            Chưa làm ({progressData.stats?.notStartedCount || 0})
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Students Table */}
+                    {(() => {
+                      const filteredStudents = (progressData.students || []).filter((s: any) => {
+                        const matchStatus = progressStatusFilter === 'all' || s.status === progressStatusFilter;
+                        const query = progressSearch.trim().toLowerCase();
+                        const matchSearch =
+                          !query ||
+                          s.studentName?.toLowerCase().includes(query) ||
+                          s.studentCode?.toLowerCase().includes(query);
+                        return matchStatus && matchSearch;
+                      });
+
+                      if (filteredStudents.length === 0) {
+                        return (
+                          <div className="py-12 text-center text-slate-400 text-xs font-medium bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                            Không có học sinh nào khớp với bộ lọc hiện tại.
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="overflow-x-auto border border-slate-200 rounded-2xl shadow-xs">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-50 text-slate-700 font-extrabold uppercase tracking-wider border-b border-slate-200">
+                              <tr>
+                                <th className="p-3 w-10 text-center">#</th>
+                                <th className="p-3">Học sinh</th>
+                                <th className="p-3">Mã học sinh</th>
+                                <th className="p-3">Trạng thái</th>
+                                <th className="p-3">Tiến độ câu</th>
+                                <th className="p-3">Điểm số</th>
+                                <th className="p-3">Đúng lần đầu</th>
+                                <th className="p-3">Đúng sau gợi ý</th>
+                                <th className="p-3">Bắt đầu / Nộp</th>
+                                <th className="p-3 text-right">Chi tiết</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {filteredStudents.map((s: any, idx: number) => {
+                                const isCompleted = s.status === 'completed';
+                                const isInProgress = s.status === 'in_progress';
+                                const isNotStarted = s.status === 'not_started';
+
+                                return (
+                                  <tr key={s.studentId} className="hover:bg-slate-50/70 transition">
+                                    <td className="p-3 text-center font-bold text-slate-400">
+                                      {idx + 1}
+                                    </td>
+                                    <td className="p-3 font-extrabold text-slate-900">
+                                      {s.studentName}
+                                      {s.attemptCount > 1 && (
+                                        <span className="ml-2 px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-bold">
+                                          Lượt {s.attemptCount}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 font-mono font-bold text-slate-600">
+                                      {s.studentCode || '—'}
+                                    </td>
+                                    <td className="p-3">
+                                      {isCompleted && (
+                                        <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-lg font-bold flex items-center gap-1 w-fit">
+                                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                          <span>Hoàn thành</span>
+                                        </span>
+                                      )}
+                                      {isInProgress && (
+                                        <span className="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-lg font-bold flex items-center gap-1 w-fit">
+                                          <Clock className="w-3.5 h-3.5 text-amber-600" />
+                                          <span>Đang làm</span>
+                                        </span>
+                                      )}
+                                      {isNotStarted && (
+                                        <span className="px-2.5 py-1 bg-slate-100 text-slate-500 rounded-lg font-bold flex items-center gap-1 w-fit">
+                                          <span>Chưa làm</span>
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 font-bold text-slate-700">
+                                      {isNotStarted ? (
+                                        <span className="text-slate-400">0 / {progressData.assignment.totalQuestions}</span>
+                                      ) : (
+                                        <span>{s.questionsAnswered} / {progressData.assignment.totalQuestions}</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 font-black text-sm">
+                                      {isCompleted && s.score !== null ? (
+                                        <span className={s.score >= 8 ? 'text-emerald-700' : s.score >= 5 ? 'text-amber-700' : 'text-rose-700'}>
+                                          {s.score}/10
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-300 font-normal">—</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 font-semibold text-slate-700">
+                                      {isCompleted && s.firstTryCorrectCount !== null ? (
+                                        <span className="text-emerald-800 font-bold">{s.firstTryCorrectCount} câu</span>
+                                      ) : (
+                                        <span className="text-slate-300">—</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 font-semibold text-slate-700">
+                                      {isCompleted && s.finalCorrectCount !== null ? (
+                                        <span className="text-amber-800 font-bold">
+                                          {Math.max(0, s.finalCorrectCount - s.firstTryCorrectCount)} câu
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-300">—</span>
+                                      )}
+                                    </td>
+                                    <td className="p-3 text-[11px] text-slate-500 space-y-0.5">
+                                      {s.startedAt && (
+                                        <div>Vào: {new Date(s.startedAt).toLocaleTimeString('vi-VN')}</div>
+                                      )}
+                                      {s.completedAt && (
+                                        <div className="font-semibold text-slate-700">Nộp: {new Date(s.completedAt).toLocaleTimeString('vi-VN')}</div>
+                                      )}
+                                      {!s.startedAt && <span className="text-slate-400">—</span>}
+                                    </td>
+                                    <td className="p-3 text-right">
+                                      {(isCompleted || isInProgress) && s.attemptId ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleViewStudentAttemptDetail(s.attemptId, s.studentId)}
+                                          className="px-3 py-1.5 bg-primary-50 hover:bg-primary-100 text-primary-700 rounded-xl font-bold transition flex items-center gap-1 ml-auto cursor-pointer"
+                                          title="Xem chi tiết từng câu trả lời"
+                                        >
+                                          <Eye className="w-3.5 h-3.5" />
+                                          <span>Xem bài</span>
+                                        </button>
+                                      ) : (
+                                        <span className="text-slate-300 text-[11px]">Chưa nộp</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </>
+              ) : (
+                <div className="py-12 text-center text-slate-500 text-xs">
+                  Không thể tải dữ liệu tiến độ.
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setViewingProgressAssignment(null)}
+                className="px-5 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs rounded-xl transition cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Submodal: Student Attempt Detail (Nhiệm vụ 3.C: Chi tiết bài làm) */}
+      {(loadingStudentDetail || studentDetailData) && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="student-attempt-detail-title"
+          className="fixed inset-0 z-[110] overflow-y-auto bg-slate-950/70 backdrop-blur-sm p-3 sm:p-4 md:p-6 flex min-h-full items-center justify-center overscroll-contain animate-fade-in"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setStudentDetailData(null);
+              setLoadingStudentDetail(false);
+            }
+          }}
+        >
+          <div className="relative bg-white rounded-3xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-auto max-h-[calc(100dvh-2.5rem)]">
+            {/* Header */}
+            <div className="p-5 md:p-6 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 shrink-0">
+              <div>
+                <span className="px-2.5 py-0.5 bg-purple-100 text-purple-800 text-[11px] font-black rounded-full uppercase tracking-wider block w-fit mb-1">
+                  Chi tiết bài làm học sinh
+                </span>
+                <h3 id="student-attempt-detail-title" className="text-xl font-black text-slate-900">
+                  {studentDetailData?.attempt?.studentName || 'Đang tải...'}
+                </h3>
+                {studentDetailData?.attempt?.studentCode && (
+                  <p className="text-xs text-slate-500 font-semibold mt-0.5">
+                    Mã học sinh: <strong className="text-slate-800">{studentDetailData.attempt.studentCode}</strong>
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setStudentDetailData(null);
+                  setLoadingStudentDetail(false);
+                }}
+                className="p-2 hover:bg-slate-200 text-slate-500 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 md:p-6 overflow-y-auto overscroll-contain space-y-4">
+              {loadingStudentDetail ? (
+                <div className="py-16 text-center space-y-3">
+                  <Loader2 className="w-8 h-8 text-primary-600 animate-spin mx-auto" />
+                  <p className="text-xs font-bold text-slate-600">Đang tải từng câu trả lời của học sinh...</p>
+                </div>
+              ) : studentDetailData ? (
+                <>
+                  {/* Summary Banner */}
+                  <div className="p-4 bg-gradient-to-r from-primary-50 to-indigo-50 border border-primary-200 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-4">
+                      <div>
+                        <span className="text-[11px] font-bold text-primary-800 block">Điểm số</span>
+                        <span className="text-2xl font-black text-primary-950">
+                          {studentDetailData.attempt.score} / 10
+                        </span>
+                      </div>
+                      <div className="h-8 w-px bg-primary-200" />
+                      <div>
+                        <span className="text-[11px] font-bold text-primary-800 block">Đúng lần đầu</span>
+                        <span className="text-base font-extrabold text-emerald-800">
+                          {studentDetailData.attempt.firstTryCorrectCount} / {studentDetailData.attempt.totalQuestions} câu
+                        </span>
+                      </div>
+                      <div className="h-8 w-px bg-primary-200" />
+                      <div>
+                        <span className="text-[11px] font-bold text-primary-800 block">Đúng sau gợi ý</span>
+                        <span className="text-base font-extrabold text-amber-800">
+                          {Math.max(0, studentDetailData.attempt.finalCorrectCount - studentDetailData.attempt.firstTryCorrectCount)} câu
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-[11px] text-slate-500 text-right">
+                      {studentDetailData.attempt.completedAt && (
+                        <div>Nộp bài: {new Date(studentDetailData.attempt.completedAt).toLocaleString('vi-VN')}</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Question Breakdown */}
+                  <div className="space-y-4 pt-2">
+                    <h4 className="font-extrabold text-sm text-slate-800 uppercase tracking-wider">
+                      Các câu hỏi đã làm ({studentDetailData.questions?.length || 0} câu)
+                    </h4>
+
+                    {(studentDetailData.questions || []).map((q: any, qIdx: number) => {
+                      const isFirstTryCorrect = Boolean(q.firstTryCorrect);
+                      const isFinalCorrect = Boolean(q.finalCorrect);
+                      const usedHint = Boolean(q.hintUsed);
+
+                      return (
+                        <div
+                          key={q.questionId || qIdx}
+                          className={`p-4 rounded-2xl border-2 space-y-3 transition ${
+                            isFirstTryCorrect
+                              ? 'bg-emerald-50/40 border-emerald-200'
+                              : isFinalCorrect
+                              ? 'bg-amber-50/40 border-amber-200'
+                              : 'bg-rose-50/40 border-rose-200'
+                          }`}
+                        >
+                          {/* Question Header */}
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-black flex items-center justify-center">
+                                {qIdx + 1}
+                              </span>
+                              <span className="px-2 py-0.5 bg-slate-100 text-slate-700 text-[10px] font-bold rounded">
+                                {QUESTION_TYPE_LABELS[q.type as keyof typeof QUESTION_TYPE_LABELS] || q.type}
+                              </span>
+                              {q.skillTag && (
+                                <span className="px-2 py-0.5 bg-purple-100 text-purple-800 text-[10px] font-bold rounded">
+                                  {SKILL_LABELS[q.skillTag as SkillTag] || q.skillTag}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Status Pill */}
+                            {isFirstTryCorrect ? (
+                              <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-xs font-black rounded-full flex items-center gap-1">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>Đúng lần đầu (100%)</span>
+                              </span>
+                            ) : isFinalCorrect ? (
+                              <span className="px-2.5 py-0.5 bg-amber-100 text-amber-900 text-xs font-black rounded-full flex items-center gap-1">
+                                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                                <span>Đúng sau gợi ý (50%)</span>
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-0.5 bg-rose-100 text-rose-800 text-xs font-black rounded-full flex items-center gap-1">
+                                <X className="w-3.5 h-3.5 text-rose-600" />
+                                <span>Chưa đạt (0%)</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Prompt */}
+                          <div className="font-bold text-sm text-slate-900">
+                            {q.prompt}
+                          </div>
+
+                          {/* Student Answers */}
+                          <div className="space-y-1.5 text-xs bg-white/80 p-3 rounded-xl border border-slate-200">
+                            <div className="flex items-start gap-2">
+                              <strong className="text-slate-600 shrink-0">Lần 1:</strong>
+                              <span className="font-semibold text-slate-800 break-words">
+                                {typeof q.firstAnswer === 'object' ? JSON.stringify(q.firstAnswer) : String(q.firstAnswer ?? 'Chưa trả lời')}
+                              </span>
+                              {isFirstTryCorrect ? (
+                                <span className="text-emerald-600 font-bold text-[11px]">✓ Đúng</span>
+                              ) : (
+                                <span className="text-rose-600 font-bold text-[11px]">✗ Chưa đúng</span>
+                              )}
+                            </div>
+
+                            {q.retryAnswer !== undefined && (
+                              <div className="flex items-start gap-2 pt-1 border-t border-slate-100">
+                                <strong className="text-slate-600 shrink-0">Lần 2 (Sau gợi ý):</strong>
+                                <span className="font-semibold text-slate-800 break-words">
+                                  {typeof q.retryAnswer === 'object' ? JSON.stringify(q.retryAnswer) : String(q.retryAnswer)}
+                                </span>
+                                {isFinalCorrect ? (
+                                  <span className="text-emerald-600 font-bold text-[11px]">✓ Đúng</span>
+                                ) : (
+                                  <span className="text-rose-600 font-bold text-[11px]">✗ Vẫn chưa đúng</span>
+                                )}
+                              </div>
+                            )}
+
+                            {usedHint && q.hintSent && (
+                              <div className="pt-1 border-t border-slate-100 text-[11px] text-amber-800 bg-amber-50/70 p-2 rounded-lg">
+                                <strong>Gợi ý sư phạm đã nhận:</strong> "{q.hintSent}"
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Teacher / Backend Correct Answer & Explanation */}
+                          <div className="p-3 bg-emerald-50/50 border border-emerald-200 rounded-xl text-xs space-y-1">
+                            <div>
+                              <strong className="text-emerald-800">Đáp án chuẩn: </strong>
+                              <span className="font-bold text-emerald-950">
+                                {typeof q.correctAnswer === 'object' ? JSON.stringify(q.correctAnswer) : String(q.correctAnswer ?? '—')}
+                              </span>
+                            </div>
+                            {q.explanation && (
+                              <div className="text-[11px] text-slate-600">
+                                <strong>Giải thích sư phạm: </strong>
+                                <em>{q.explanation}</em>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : null}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setStudentDetailData(null);
+                  setLoadingStudentDetail(false);
+                }}
+                className="px-5 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs rounded-xl transition cursor-pointer"
+              >
+                Đóng
               </button>
             </div>
           </div>

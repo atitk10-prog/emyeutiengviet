@@ -32,6 +32,17 @@ export function cleanOptionText(text: string): string {
   if (!text || typeof text !== 'string') return '';
   return text
     .replace(/^(\([0-9]+\)|[A-Da-d]|[0-9]+)[\.\)\:\-\s]+\s*/, '')
+    .replace(/[.,!?;:"'«»()\[\]{}]+$/g, '')
+    .trim();
+}
+
+export function cleanMatchingText(text: string): string {
+  if (!text || typeof text !== 'string') return '';
+  return cleanOptionText(text)
+    .normalize('NFC')
+    .replace(/\s+/g, ' ')
+    .replace(/[.,!?;:"'«»()\[\]{}]+$/g, '')
+    .toLowerCase()
     .trim();
 }
 
@@ -286,10 +297,18 @@ export function checkAnswerCorrectness(
     for (const [leftKey, rightVal] of cPairs.entries()) {
       const studentRight = sPairs.get(leftKey);
       if (!studentRight) return false;
-      if (studentRight !== rightVal) {
-        if (studentRight.length > 5 && rightVal.length > 5) {
-          if (!studentRight.includes(rightVal) && !rightVal.includes(studentRight)) {
-            return false;
+      const sNorm = cleanMatchingText(studentRight);
+      const rNorm = cleanMatchingText(rightVal);
+      if (sNorm !== rNorm) {
+        if (sNorm.length > 5 && rNorm.length > 5) {
+          if (!sNorm.includes(rNorm) && !rNorm.includes(sNorm)) {
+            const sTokens = sNorm.split(' ').filter((t: string) => t.length > 1 && !['như', 'lời', 'của', 'và'].includes(t));
+            const rTokens = rNorm.split(' ').filter((t: string) => t.length > 1 && !['như', 'lời', 'của', 'và'].includes(t));
+            const matches = sTokens.filter((t: string) => rTokens.includes(t));
+            const overlapRatio = matches.length / Math.max(sTokens.length, rTokens.length);
+            if (overlapRatio < 0.6) {
+              return false;
+            }
           }
         } else {
           return false;

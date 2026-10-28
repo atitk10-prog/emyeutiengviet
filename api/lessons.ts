@@ -104,6 +104,14 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
         result = await handleApproveLessonAudio(req, data);
         break;
 
+      case 'getAssignmentProgress':
+        result = await handleGetAssignmentProgress(req, data);
+        break;
+
+      case 'getStudentAttemptDetail':
+        result = await handleGetStudentAttemptDetail(req, data);
+        break;
+
       default:
         throw new ApiError(
           400,
@@ -304,8 +312,14 @@ async function handleGetTeacherLessons(req: VercelApiRequest, data: any) {
   for (const doc of snap.docs) {
     const lData = doc.data();
     const assignedClasses = assignmentsByLesson.get(doc.id) || [];
+    const totalQ = lData.totalQuestions ?? lData.questionCount ?? lData.draftData?.questions?.length ?? 0;
+    const draftQ = lData.draftData?.questions?.length ?? null;
     lessons.push({
       ...lData,
+      totalQuestions: totalQ,
+      questionCount: totalQ,
+      draftQuestionCount: draftQ,
+      hasUnpublishedDraftChanges: lData.status === 'published' && draftQ !== null && draftQ !== totalQ,
       assignedClassCount: assignedClasses.length,
       assignedClasses
     });
@@ -326,6 +340,8 @@ async function handleGetTeacherLessons(req: VercelApiRequest, data: any) {
             week: (s as any).week || 1,
             academicYearScope: 'shared',
             status: 'published',
+            totalQuestions: s.questions.length,
+            questionCount: s.questions.length,
             currentVersionId: `${s.id}-v1`,
             assignedClassCount: 0,
             isSystemLesson: true,
@@ -562,6 +578,7 @@ async function handleSaveLessonDraft(req: VercelApiRequest, data: any) {
     audioMetadata: draft.audioMetadata || undefined
   };
 
+  const qCount = draftPayload.questions?.length || 0;
   await lessonRef.set(
     {
       id: lessonId,
@@ -573,12 +590,17 @@ async function handleSaveLessonDraft(req: VercelApiRequest, data: any) {
       week: draftPayload.week,
       genre: draftPayload.genre,
       status: 'draft',
+      totalQuestions: qCount,
+      questionCount: qCount,
       draftData: draftPayload,
       updatedAt: now,
       createdAt: existingLessonId ? undefined : now
     },
     { merge: true }
   );
+
+  teacherLessonsCache.clear();
+  lessonDetailCache.clear();
 
   return {
     success: true,
@@ -660,6 +682,7 @@ async function handlePublishLesson(req: VercelApiRequest, data: any) {
     };
   });
 
+  const qCount = publicQuestions.length;
   const versionData = {
     versionId,
     lessonId,
@@ -672,6 +695,8 @@ async function handlePublishLesson(req: VercelApiRequest, data: any) {
     passage: rawDraft.passage,
     vocabulary: rawDraft.vocabulary || [],
     publicQuestions,
+    totalQuestions: qCount,
+    questionCount: qCount,
     audioUrl: rawDraft.audioUrl || undefined,
     audioMetadata: rawDraft.audioMetadata || undefined,
     publishedAt: now,
@@ -705,6 +730,8 @@ async function handlePublishLesson(req: VercelApiRequest, data: any) {
       week: versionData.week,
       status: 'published',
       currentVersionId: versionId,
+      totalQuestions: qCount,
+      questionCount: qCount,
       audioUrl: versionData.audioUrl || undefined,
       updatedAt: now,
       createdAt: existingLessonId ? undefined : now
@@ -713,6 +740,9 @@ async function handlePublishLesson(req: VercelApiRequest, data: any) {
   );
 
   await batch.commit();
+
+  teacherLessonsCache.clear();
+  lessonDetailCache.clear();
 
   return {
     success: true,
@@ -737,6 +767,8 @@ async function handleArchiveLesson(req: VercelApiRequest, data: any) {
   }
 
   await ref.update({ status: 'archived', updatedAt: Date.now() });
+  teacherLessonsCache.clear();
+  lessonDetailCache.clear();
   return { success: true, message: 'Đã lưu trữ bài đọc thành công.' };
 }
 
@@ -758,6 +790,8 @@ async function handleDeleteDraftLesson(req: VercelApiRequest, data: any) {
   }
 
   await ref.delete();
+  teacherLessonsCache.clear();
+  lessonDetailCache.clear();
   return { success: true, message: 'Đã xóa bản nháp thành công.' };
 }
 
@@ -857,6 +891,8 @@ async function handleAssignLesson(req: VercelApiRequest, data: any) {
       week: Number(vData.week || 1),
       lessonId,
       lessonVersionId: targetVersionId,
+      lessonVersionNumber: vData.versionNumber || 1,
+      totalQuestions: vData.publicQuestions?.length || vData.totalQuestions || 5,
       teacherUid,
       lessonTitle: vData.title,
       grade: vData.grade,
@@ -878,6 +914,9 @@ async function handleAssignLesson(req: VercelApiRequest, data: any) {
     await assignRef.set(assignmentData);
     createdAssignments.push(assignmentData);
   }
+
+  teacherLessonsCache.clear();
+  assignmentProgressCache.clear();
 
   if (targetClassIds.length === 1 && createdAssignments.length === 0 && preventedDuplicates.length > 0) {
     return {
@@ -1649,5 +1688,329 @@ async function handleApproveLessonAudio(req: VercelApiRequest, data: any) {
     success: true,
     audioUrl: realAudioUrl,
     message: 'Đã phê duyệt và lưu giọng đọc AI vào bài học thành công.'
+  };
+}
+
+// 15. ASSIGNMENT PROGRESS TRACKING (Phase P0 - Realtime / Low-read cached)
+const assignmentProgressCache = new Map<string, { result: any; timestamp: number }>();
+const ASSIGNMENT_PROGRESS_CACHE_TTL_MS = 20 * 1000;
+
+async function handleGetAssignmentProgress(req: VercelApiRequest, data: any) {
+  const { uid: teacherUid } = await requireTeacher(req);
+  const { assignmentId, lessonId, classId, refresh } = data || {};
+
+  const cacheKey = `${teacherUid}_${assignmentId || 'all'}_${lessonId || 'all'}_${classId || 'all'}`;
+  if (!refresh) {
+    const cached = assignmentProgressCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < ASSIGNMENT_PROGRESS_CACHE_TTL_MS) {
+      return cached.result;
+    }
+  }
+
+  const db = getDb();
+
+  // Find assignments for this teacher
+  let assignDocs: FirebaseFirestore.DocumentSnapshot[] = [];
+  if (assignmentId) {
+    const singleDoc = await db.collection('assignments').doc(assignmentId).get();
+    if (singleDoc.exists) {
+      assignDocs = [singleDoc];
+    }
+  } else {
+    let assignQuery: FirebaseFirestore.Query = db
+      .collection('assignments')
+      .where('teacherUid', '==', teacherUid);
+
+    if (lessonId) assignQuery = assignQuery.where('lessonId', '==', lessonId);
+    if (classId) assignQuery = assignQuery.where('classId', '==', classId);
+    assignQuery = assignQuery.where('status', '==', 'active');
+
+    const snap = await assignQuery.limit(50).get();
+    assignDocs = snap.docs;
+  }
+
+  if (assignDocs.length === 0) {
+    const emptyResult = { success: true, assignments: [] };
+    assignmentProgressCache.set(cacheKey, { result: emptyResult, timestamp: Date.now() });
+    return emptyResult;
+  }
+
+  const assignmentsList: any[] = [];
+
+  for (const aDoc of assignDocs) {
+    const asg: any = aDoc.data();
+    if (asg.teacherUid !== teacherUid) continue; // Safety guard: ownership verification
+
+    // Fetch class info
+    let className = asg.className || asg.classId;
+    let grade = asg.grade || 2;
+    try {
+      const cDoc = await db.collection('classes').doc(asg.classId).get();
+      if (cDoc.exists) {
+        className = cDoc.data()?.name || className;
+        grade = cDoc.data()?.grade || grade;
+      }
+    } catch {
+      // ignore
+    }
+
+    // Fetch version total questions
+    let totalQuestions = asg.totalQuestions || 5;
+    try {
+      const vDoc = await db
+        .collection('lessons')
+        .doc(asg.lessonId)
+        .collection('versions')
+        .doc(asg.lessonVersionId)
+        .get();
+      if (vDoc.exists) {
+        totalQuestions = vDoc.data()?.publicQuestions?.length || vDoc.data()?.totalQuestions || totalQuestions;
+      }
+    } catch {
+      // ignore
+    }
+
+    // Fetch all students belonging to this class
+    const studentsSnap = await db
+      .collection('students')
+      .where('classId', '==', asg.classId)
+      .limit(100)
+      .get();
+
+    // Fetch all attempts for this specific assignment (strictly bounded by assignmentId!)
+    const attemptsSnap = await db
+      .collection('attempts')
+      .where('assignmentId', '==', aDoc.id)
+      .limit(200)
+      .get();
+
+    // Group attempts by studentId
+    const attemptsByStudent = new Map<string, any[]>();
+    attemptsSnap.docs.forEach((attDoc) => {
+      const attData = { id: attDoc.id, ...attDoc.data() };
+      const sId = (attData as any).studentId;
+      if (!sId) return;
+      const list = attemptsByStudent.get(sId) || [];
+      list.push(attData);
+      attemptsByStudent.set(sId, list);
+    });
+
+    // Map each student in the class to their progress
+    const studentsProgress: any[] = [];
+    let completedCount = 0;
+    let inProgressCount = 0;
+    let notStartedCount = 0;
+    let sumScore = 0;
+    let sumFirstTry = 0;
+    let sumAfterHint = 0;
+
+    studentsSnap.docs.forEach((sDoc) => {
+      const sData = sDoc.data();
+      const sId = sDoc.id;
+      const studentAttempts = attemptsByStudent.get(sId) || [];
+
+      // Sort attempts by completedAt desc, then startedAt desc
+      studentAttempts.sort((a, b) => (b.completedAt || b.startedAt || 0) - (a.completedAt || a.startedAt || 0));
+
+      const completedAttempt = studentAttempts.find((a) => a.status === 'completed');
+      const inProgressAttempt = studentAttempts.find((a) => a.status === 'in_progress');
+
+      let status: 'not_started' | 'in_progress' | 'completed' = 'not_started';
+      let primaryAttempt: any = null;
+
+      if (completedAttempt) {
+        status = 'completed';
+        primaryAttempt = completedAttempt;
+        completedCount++;
+        const score = typeof completedAttempt.scorePercentage === 'number'
+          ? completedAttempt.scorePercentage
+          : Math.round(((completedAttempt.finalCorrectCount || 0) / (completedAttempt.totalQuestions || totalQuestions)) * 100);
+        sumScore += score;
+        sumFirstTry += completedAttempt.firstTryCorrectCount || 0;
+        sumAfterHint += Math.max(0, (completedAttempt.finalCorrectCount || 0) - (completedAttempt.firstTryCorrectCount || 0));
+      } else if (inProgressAttempt) {
+        status = 'in_progress';
+        primaryAttempt = inProgressAttempt;
+        inProgressCount++;
+      } else {
+        status = 'not_started';
+        notStartedCount++;
+      }
+
+      const qTotal = primaryAttempt?.totalQuestions || totalQuestions;
+      const qDone = status === 'completed' ? qTotal : (primaryAttempt?.finalCorrectCount || 0);
+
+      studentsProgress.push({
+        studentId: sId,
+        studentCode: sData.studentCode || '',
+        displayName: sData.displayAlias || sData.name || sData.studentCode || 'Học sinh',
+        status,
+        startedAt: primaryAttempt?.startedAt || null,
+        completedAt: primaryAttempt?.completedAt || null,
+        completedQuestions: qDone,
+        totalQuestions: qTotal,
+        scorePercentage: status === 'completed'
+          ? (typeof primaryAttempt.scorePercentage === 'number'
+              ? primaryAttempt.scorePercentage
+              : Math.round(((primaryAttempt.finalCorrectCount || 0) / qTotal) * 100))
+          : null,
+        firstTryCorrectCount: primaryAttempt?.firstTryCorrectCount ?? null,
+        finalCorrectCount: primaryAttempt?.finalCorrectCount ?? null,
+        hintCount: primaryAttempt?.hintCount ?? null,
+        attemptId: primaryAttempt?.id || null,
+        attemptsCount: studentAttempts.length
+      });
+    });
+
+    // Sort students: in-progress first, then completed, then not started; secondary sort by studentCode
+    studentsProgress.sort((a, b) => {
+      const order: Record<string, number> = { in_progress: 0, completed: 1, not_started: 2 };
+      const aOrder = order[a.status] ?? 3;
+      const bOrder = order[b.status] ?? 3;
+      if (aOrder !== bOrder) {
+        return aOrder - bOrder;
+      }
+      return (a.studentCode || '').localeCompare(b.studentCode || '');
+    });
+
+    const totalStudents = studentsSnap.size;
+    const completionRate = totalStudents > 0 ? Math.round((completedCount / totalStudents) * 100) : 0;
+    const averageScorePercentage = completedCount > 0 ? Math.round(sumScore / completedCount) : null;
+    const averageFirstTryCorrect = completedCount > 0 ? Number((sumFirstTry / completedCount).toFixed(1)) : null;
+    const averageAfterHintCorrect = completedCount > 0 ? Number((sumAfterHint / completedCount).toFixed(1)) : null;
+
+    assignmentsList.push({
+      assignmentId: aDoc.id,
+      classId: asg.classId,
+      className,
+      grade,
+      roundName: asg.roundName || 'Đợt 1',
+      academicYear: asg.academicYear || '2026-2027',
+      lessonId: asg.lessonId,
+      lessonTitle: asg.lessonTitle || '',
+      lessonVersionId: asg.lessonVersionId,
+      lessonVersionNumber: asg.lessonVersionNumber || 1,
+      availableFrom: asg.availableFrom || asg.createdAt,
+      availableUntil: asg.availableUntil || null,
+      maxAttempts: asg.maxAttempts || 3,
+      totalQuestions,
+      totalStudents,
+      completedCount,
+      inProgressCount,
+      notStartedCount,
+      completionRate,
+      averageScorePercentage,
+      averageFirstTryCorrect,
+      averageAfterHintCorrect,
+      students: studentsProgress
+    });
+  }
+
+  const result = { success: true, assignments: assignmentsList };
+  assignmentProgressCache.set(cacheKey, { result, timestamp: Date.now() });
+  return result;
+}
+
+// 16. DETAILED STUDENT ATTEMPT (Teacher inspection - On-demand only)
+async function handleGetStudentAttemptDetail(req: VercelApiRequest, data: any) {
+  const { uid: teacherUid } = await requireTeacher(req);
+  const { attemptId } = data || {};
+
+  if (!attemptId) {
+    throw new ApiError(400, 'invalid-argument', 'Mã lượt làm bài không được để trống.');
+  }
+
+  const db = getDb();
+  const attDoc = await db.collection('attempts').doc(attemptId).get();
+  if (!attDoc.exists) {
+    throw new ApiError(404, 'not-found', 'Không tìm thấy lượt làm bài này.');
+  }
+
+  const att = attDoc.data()!;
+  if (att.teacherUid !== teacherUid) {
+    throw new ApiError(403, 'permission-denied', 'Bạn không có quyền xem bài làm này.');
+  }
+
+  // Get student profile
+  let studentName = 'Học sinh';
+  let studentCode = '';
+  try {
+    const sDoc = await db.collection('students').doc(att.studentId).get();
+    if (sDoc.exists) {
+      studentName = sDoc.data()?.displayAlias || sDoc.data()?.name || studentName;
+      studentCode = sDoc.data()?.studentCode || '';
+    }
+  } catch {
+    // ignore
+  }
+
+  // Get lesson version public questions
+  let publicQuestions: any[] = [];
+  try {
+    const vDoc = await db
+      .collection('lessons')
+      .doc(att.lessonId)
+      .collection('versions')
+      .doc(att.lessonVersionId)
+      .get();
+    if (vDoc.exists) {
+      publicQuestions = vDoc.data()?.publicQuestions || [];
+    }
+  } catch {
+    // ignore
+  }
+
+  // Get attempt responses
+  const respSnap = await db.collection('attempts').doc(attemptId).collection('responses').get();
+  const respMap = new Map<string, any>();
+  respSnap.docs.forEach((d) => respMap.set(d.id, d.data()));
+
+  const questionsDetail = publicQuestions.map((q) => {
+    const r = respMap.get(q.id);
+    return {
+      questionId: q.id,
+      prompt: q.prompt,
+      type: q.type,
+      skillTag: q.skillTag,
+      difficulty: q.difficulty,
+      options: q.options || undefined,
+      items: q.items || undefined,
+      leftItems: q.leftItems || undefined,
+      rightItems: q.rightItems || undefined,
+      blankContext: q.blankContext || undefined,
+      answered: Boolean(r),
+      firstAnswer: r?.firstAnswer ?? null,
+      retryAnswer: r?.retryAnswer ?? null,
+      firstTryCorrect: Boolean(r?.firstTryCorrect),
+      finalCorrect: Boolean(r?.finalCorrect),
+      hintUsed: Boolean(r?.hintUsed),
+      hintSent: r?.hintSent || null,
+      explanation: r?.explanationSent || null,
+      correctAnswer: r?.correctAnswerSent || null
+    };
+  });
+
+  return {
+    success: true,
+    attempt: {
+      attemptId,
+      studentId: att.studentId,
+      studentName,
+      studentCode,
+      classId: att.classId,
+      assignmentId: att.assignmentId,
+      lessonId: att.lessonId,
+      lessonTitle: att.lessonTitle,
+      startedAt: att.startedAt,
+      completedAt: att.completedAt,
+      status: att.status,
+      scorePercentage: att.scorePercentage,
+      starsEarned: att.starsEarned,
+      firstTryCorrectCount: att.firstTryCorrectCount,
+      finalCorrectCount: att.finalCorrectCount,
+      hintCount: att.hintCount,
+      totalQuestions: att.totalQuestions || publicQuestions.length
+    },
+    questions: questionsDetail
   };
 }
