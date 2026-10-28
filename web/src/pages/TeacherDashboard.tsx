@@ -368,6 +368,7 @@ export const TeacherDashboard: React.FC = () => {
   const [remedLibSort, setRemedLibSort] = useState<'updated_desc' | 'updated_asc' | 'title_asc'>('updated_desc');
   const [savingActivityId, setSavingActivityId] = useState<string | null>(null);
   const [approvingActivityId, setApprovingActivityId] = useState<string | null>(null);
+  const [savingGameTemplate, setSavingGameTemplate] = useState<boolean>(false);
   const [activityDetailOriginalBackup, setActivityDetailOriginalBackup] = useState<RemediationActivity | null>(null);
   const [activityDetailViewMode, setActivityDetailViewMode] = useState<'edit' | 'preview'>('edit');
   const [editableWorksheetNodes, setEditableWorksheetNodes] = useState<Array<{ label: string; details?: string }>>([
@@ -2332,10 +2333,10 @@ export const TeacherDashboard: React.FC = () => {
   const handleSaveActivityDraft = async (
     activityToSave: RemediationActivity,
     createNewDraftVersion: boolean = false
-  ) => {
+  ): Promise<boolean> => {
     if (!activityToSave.title || activityToSave.title.trim().length < 3) {
       alert('Tên hoạt động phải có tối thiểu 3 ký tự.');
-      return;
+      return false;
     }
 
     const targetId = createNewDraftVersion
@@ -2346,7 +2347,7 @@ export const TeacherDashboard: React.FC = () => {
       ? (activityToSave.title.includes('(Bản nháp') ? activityToSave.title : `${activityToSave.title} (Bản nháp mới)`)
       : activityToSave.title;
 
-    setSavingActivityId(activityToSave.id);
+    setSavingActivityId(targetId);
     try {
       const currentClass = classes.find((c) => c.id === (activityToSave.classId || remedNavClassId));
       const payload: any = {
@@ -2390,12 +2391,14 @@ export const TeacherDashboard: React.FC = () => {
 
         // Tải lại danh sách hoạt động của tôi từ Firestore
         await loadMyActivities();
+        return true;
       } else {
         throw new Error(res.data?.message || 'Không thể lưu hoạt động.');
       }
     } catch (err: any) {
       console.error('Lỗi lưu hoạt động:', err);
       alert('Lỗi lưu hoạt động: ' + (err.message || 'Vui lòng kiểm tra lại kết nối Firestore.'));
+      return false;
     } finally {
       setSavingActivityId(null);
     }
@@ -2524,69 +2527,84 @@ export const TeacherDashboard: React.FC = () => {
 
   // Handler: Lưu Mẫu Học Liệu Tương Tác / Trò Chơi vào Firestore (PHẦN 4)
   const handleSaveGameTemplateAsActivity = async () => {
-    const currentClass = classes.find((c) => c.id === remedNavClassId) || selectedClass;
-    let actType: RemediationActivityType = 'truy_tim_nghia_tu';
-    let defaultTitle = 'Trò chơi tương tác: Ghép từ với nghĩa';
-    let targetSkill: SkillTag = 'tu_trong_ngu_canh';
-    let objective = 'Củng cố vốn từ và hiểu nghĩa của từ trong ngữ cảnh bài đọc.';
-    let steps = [
-      'Khởi động: Giáo viên giới thiệu các thẻ từ và thẻ nghĩa trên màn hình.',
-      'Thực hành: Học sinh thảo luận theo cặp, đọc kỹ từ và tìm nghĩa tương ứng.',
-      'Vận dụng: Đặt câu với một trong các từ vừa ghép đúng.',
-      'Đánh giá: Tuyên dương các bạn có thời gian ghép nhanh và chính xác nhất.'
-    ];
+    if (savingGameTemplate) return;
+    setSavingGameTemplate(true);
+    try {
+      const currentClass = classes.find((c) => c.id === remedNavClassId) || selectedClass;
+      let actType: RemediationActivityType = 'truy_tim_nghia_tu';
+      let defaultTitle = 'Trò chơi tương tác: Ghép từ với nghĩa';
+      let targetSkill: SkillTag = 'tu_trong_ngu_canh';
+      let objective = 'Củng cố vốn từ và hiểu nghĩa của từ trong ngữ cảnh bài đọc.';
+      let steps = [
+        'Khởi động: Giáo viên giới thiệu các thẻ từ và thẻ nghĩa trên màn hình.',
+        'Thực hành: Học sinh thảo luận theo cặp, đọc kỹ từ và tìm nghĩa tương ứng.',
+        'Vận dụng: Đặt câu với một trong các từ vừa ghép đúng.',
+        'Đánh giá: Tuyên dương các bạn có thời gian ghép nhanh và chính xác nhất.'
+      ];
 
-    if (gameModalType === 'sequence_order') {
-      actType = 'xep_tranh_trinh_tu';
-      defaultTitle = 'Trò chơi tương tác: Sắp xếp trình tự câu chuyện';
-      targetSkill = 'sap_xep_trinh_tu';
-      objective = 'Rèn luyện kỹ năng nhận biết trật tự thời gian và diễn biến cốt truyện.';
-      steps = [
-        'Khởi động: Đọc lại lướt nhanh các sự việc chính trong câu chuyện.',
-        'Thực hành: Học sinh dùng nút mũi tên hoặc kéo thẻ để sắp xếp theo trình tự 1 - 2 - 3 - 4.',
-        'Vận dụng: Nhìn vào các thẻ đã xếp đúng, kể tóm tắt lại câu chuyện theo lời của em.',
-        'Đánh giá: Nhận xét khả năng ghi nhớ cốt truyện và diễn đạt lưu loát.'
-      ];
-    } else if (gameModalType === 'worksheet') {
-      actType = 'phieu_hoc_tap_so_do';
-      defaultTitle = 'Phiếu học tập: Sơ đồ tư duy bông hoa đọc hiểu';
-      targetSkill = 'noi_dung_chinh';
-      objective = 'Hệ thống hóa nội dung bài đọc bằng sơ đồ tư duy trực quan.';
-      steps = [
-        'Khởi động: Giáo viên phát phiếu học tập hoặc chiếu sơ đồ bông hoa lên màn hình.',
-        'Thực hiện: Học sinh điền tên nhân vật vào nhụy hoa và các sự việc vào cánh hoa.',
-        'Chia sẻ: Đại diện các nhóm chia sẻ sơ đồ tư duy của nhóm mình.',
-        'Đánh giá: Giáo viên nhận xét, khen ngợi sự sáng tạo và hệ thống kiến thức.'
-      ];
+      if (gameModalType === 'sequence_order') {
+        actType = 'xep_tranh_trinh_tu';
+        defaultTitle = 'Trò chơi tương tác: Sắp xếp trình tự câu chuyện';
+        targetSkill = 'sap_xep_trinh_tu';
+        objective = 'Rèn luyện kỹ năng nhận biết trật tự thời gian và diễn biến cốt truyện.';
+        steps = [
+          'Khởi động: Đọc lại lướt nhanh các sự việc chính trong câu chuyện.',
+          'Thực hành: Học sinh dùng nút mũi tên hoặc kéo thẻ để sắp xếp theo trình tự 1 - 2 - 3 - 4.',
+          'Vận dụng: Nhìn vào các thẻ đã xếp đúng, kể tóm tắt lại câu chuyện theo lời của em.',
+          'Đánh giá: Nhận xét khả năng ghi nhớ cốt truyện và diễn đạt lưu loát.'
+        ];
+      } else if (gameModalType === 'worksheet') {
+        actType = 'phieu_hoc_tap_so_do';
+        defaultTitle = 'Phiếu học tập: Sơ đồ tư duy bông hoa đọc hiểu';
+        targetSkill = 'noi_dung_chinh';
+        objective = 'Hệ thống hóa nội dung bài đọc bằng sơ đồ tư duy trực quan.';
+        steps = [
+          'Khởi động: Giáo viên phát phiếu học tập hoặc chiếu sơ đồ bông hoa lên màn hình.',
+          'Thực hiện: Học sinh điền tên nhân vật vào nhụy hoa và các sự việc vào cánh hoa.',
+          'Chia sẻ: Đại diện các nhóm chia sẻ sơ đồ tư duy của nhóm mình.',
+          'Đánh giá: Giáo viên nhận xét, khen ngợi sự sáng tạo và hệ thống kiến thức.'
+        ];
+      }
+
+      // Luôn tạo ID mới độc lập cho mẫu mới, tuyệt đối không dùng lại ID của hoạt động nguồn
+      const newActivityId = `act_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      const newActivity: RemediationActivity = {
+        id: newActivityId,
+        activityType: actType,
+        title: defaultTitle,
+        targetAudience: `Lớp ${currentClass?.name || '2B'} · Toàn lớp`,
+        targetSkill,
+        skillObjective: objective,
+        sourceLessonTitle: gameActivitySource?.sourceLessonTitle || 'Học liệu Tiếng Việt lớp 2–3',
+        durationMinutes: 10,
+        materialsNeeded: ['Thẻ chữ', 'Màn hình máy chiếu', 'Phiếu học tập'],
+        teacherSteps: steps,
+        contentPayload: {
+          instructions: 'Giáo viên tổ chức theo hình thức trò chơi tương tác hoặc phát phiếu bài tập.',
+          gameTemplate: gameModalType === 'worksheet' ? 'worksheet_mindmap' : gameModalType,
+          gameData: {
+            pairs: editableWordPairs,
+            sequenceItems: editableSequenceItems,
+            mindmapNodes: editableWorksheetNodes
+          }
+        },
+        evaluationCriteria: 'Học sinh hoàn thành đúng tối thiểu 80% yêu cầu của bài tập.',
+        status: 'draft', // Luôn là bản nháp khi lưu từ mẫu
+        approvedAt: null,
+        approvedBy: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+
+      const success = await handleSaveActivityDraft(newActivity, false);
+      if (success) {
+        setShowGameModal(false);
+      }
+    } catch (err: any) {
+      alert('Lỗi lưu mẫu trò chơi: ' + (err.message || 'Vui lòng thử lại.'));
+    } finally {
+      setSavingGameTemplate(false);
     }
-
-    const newActivity: RemediationActivity = {
-      id: gameActivitySource?.id || `act_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-      activityType: actType,
-      title: defaultTitle,
-      targetAudience: `Lớp ${currentClass?.name || '2C'} · Toàn lớp`,
-      targetSkill,
-      skillObjective: objective,
-      sourceLessonTitle: gameActivitySource?.sourceLessonTitle || 'Học liệu Tiếng Việt lớp 2–3',
-      durationMinutes: 10,
-      materialsNeeded: ['Thẻ chữ', 'Màn hình máy chiếu', 'Phiếu học tập'],
-      teacherSteps: steps,
-      contentPayload: {
-        instructions: 'Giáo viên tổ chức theo hình thức trò chơi tương tác hoặc phát phiếu bài tập.',
-        gameTemplate: gameModalType === 'worksheet' ? 'worksheet_mindmap' : gameModalType,
-        gameData: {
-          pairs: editableWordPairs,
-          sequenceItems: editableSequenceItems,
-          mindmapNodes: editableWorksheetNodes
-        }
-      },
-      evaluationCriteria: 'Học sinh hoàn thành đúng tối thiểu 80% yêu cầu của bài tập.',
-      status: 'draft',
-      createdAt: Date.now()
-    };
-
-    await handleSaveActivityDraft(newActivity);
-    setShowGameModal(false);
   };
 
   // Load Export & Report Data (Module 5: Manual trigger via Xem Báo Cáo)
@@ -8706,9 +8724,9 @@ export const TeacherDashboard: React.FC = () => {
                                 setSelectedActivityDetail(JSON.parse(JSON.stringify(act)));
                                 setActivityDetailViewMode('edit');
                               }}
-                              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1"
+                              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0"
                             >
-                              <Eye className="w-3.5 h-3.5 text-slate-500" />
+                              <Eye className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                               <span>Xem & Sửa</span>
                             </button>
 
@@ -8716,10 +8734,10 @@ export const TeacherDashboard: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => handleDuplicateActivity(act)}
-                              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1"
+                              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0"
                               title="Tạo bản sao độc lập của hoạt động này"
                             >
-                              <Copy className="w-3.5 h-3.5 text-slate-500" />
+                              <Copy className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                               <span className="hidden sm:inline">Sao chép</span>
                             </button>
 
@@ -8729,12 +8747,12 @@ export const TeacherDashboard: React.FC = () => {
                                 type="button"
                                 disabled={approvingActivityId === act.id}
                                 onClick={() => handleApproveActivity(act)}
-                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-xs"
+                                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-xs whitespace-nowrap shrink-0"
                               >
                                 {approvingActivityId === act.id ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                                 ) : (
-                                  <Check className="w-3.5 h-3.5" />
+                                  <Check className="w-3.5 h-3.5 shrink-0" />
                                 )}
                                 <span>Duyệt & Đưa vào kho</span>
                               </button>
@@ -10053,8 +10071,8 @@ export const TeacherDashboard: React.FC = () => {
           {/* MODAL XEM CHI TIẾT & CHỈNH SỬA HOẠT ĐỘNG SƯ PHẠM */}
           {/* ========================================================= */}
           {selectedActivityDetail && (
-                    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-                      <div className="bg-white rounded-3xl max-w-3xl w-full p-6 sm:p-7 space-y-5 border border-slate-200 shadow-2xl animate-fade-in my-8">
+                    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+                      <div className="bg-white rounded-3xl max-w-3xl w-full p-5 sm:p-7 border border-slate-200 shadow-2xl animate-fade-in my-6 max-h-[92vh] flex flex-col">
                         {/* Header của Modal kèm Tab Switcher */}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
                           <div className="flex items-center gap-2.5">
@@ -10528,15 +10546,15 @@ export const TeacherDashboard: React.FC = () => {
                         )}
 
                         {/* Footer của Modal */}
-                        <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
-                          <div className="text-[11px] text-slate-500 font-medium">
+                        <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0">
+                          <div className="text-xs text-slate-600 font-medium">
                             Trạng thái hiện tại:{' '}
-                            <strong className="text-slate-800">
+                            <strong className={selectedActivityDetail.status === 'approved' ? 'text-emerald-700 font-black' : 'text-amber-700 font-black'}>
                               {selectedActivityDetail.status === 'approved' ? '✓ Đã phê duyệt' : 'Bản nháp đề xuất'}
                             </strong>
                           </div>
 
-                          <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex flex-wrap items-center justify-end gap-2.5">
                             <button
                               type="button"
                               onClick={() => {
@@ -10545,9 +10563,9 @@ export const TeacherDashboard: React.FC = () => {
                                 }
                                 setSelectedActivityDetail(null);
                               }}
-                              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer text-xs"
+                              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer text-xs sm:text-sm shrink-0"
                             >
-                              Hủy bỏ
+                              Đóng
                             </button>
 
                             {selectedActivityDetail.status === 'approved' ? (
@@ -10556,20 +10574,20 @@ export const TeacherDashboard: React.FC = () => {
                                   type="button"
                                   disabled={savingActivityId === selectedActivityDetail.id}
                                   onClick={() => handleSaveActivityDraft(selectedActivityDetail, true)}
-                                  className="px-4 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold rounded-xl transition cursor-pointer text-xs flex items-center gap-1.5 disabled:opacity-50 shadow-xs"
+                                  className="px-4 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold rounded-xl transition cursor-pointer text-xs sm:text-sm flex items-center gap-1.5 disabled:opacity-50 shadow-xs whitespace-nowrap shrink-0"
                                 >
                                   {savingActivityId === selectedActivityDetail.id ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                                    <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
                                   ) : (
-                                    <Copy className="w-3.5 h-3.5 text-amber-700" />
+                                    <Copy className="w-4 h-4 text-amber-700 shrink-0" />
                                   )}
                                   <span>
                                     {savingActivityId === selectedActivityDetail.id ? 'Đang tạo bản nháp...' : 'Lưu thành bản nháp mới'}
                                   </span>
                                 </button>
 
-                                <div className="px-3.5 py-2 bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-default">
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <div className="px-4 py-2.5 bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold rounded-xl text-xs sm:text-sm flex items-center gap-1.5 cursor-default whitespace-nowrap shrink-0">
+                                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                                   <span>✓ Đã duyệt trong kho</span>
                                 </div>
                               </>
@@ -10579,12 +10597,12 @@ export const TeacherDashboard: React.FC = () => {
                                   type="button"
                                   disabled={savingActivityId === selectedActivityDetail.id}
                                   onClick={() => handleSaveActivityDraft(selectedActivityDetail, false)}
-                                  className="px-4 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold rounded-xl transition cursor-pointer text-xs flex items-center gap-1.5 disabled:opacity-50"
+                                  className="px-4 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold rounded-xl transition cursor-pointer text-xs sm:text-sm flex items-center gap-1.5 disabled:opacity-50 whitespace-nowrap shrink-0"
                                 >
                                   {savingActivityId === selectedActivityDetail.id ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                                    <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
                                   ) : (
-                                    <Save className="w-3.5 h-3.5 text-amber-700" />
+                                    <Save className="w-4 h-4 text-amber-700 shrink-0" />
                                   )}
                                   <span>
                                     {savingActivityId === selectedActivityDetail.id ? 'Đang lưu...' : 'Lưu bản nháp'}
@@ -10595,12 +10613,12 @@ export const TeacherDashboard: React.FC = () => {
                                   type="button"
                                   disabled={approvingActivityId === selectedActivityDetail.id}
                                   onClick={() => handleApproveActivity(selectedActivityDetail)}
-                                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition cursor-pointer text-xs flex items-center gap-1.5 shadow-xs"
+                                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition cursor-pointer text-xs sm:text-sm flex items-center gap-1.5 shadow-xs whitespace-nowrap shrink-0 disabled:opacity-50"
                                 >
                                   {approvingActivityId === selectedActivityDetail.id ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
                                   ) : (
-                                    <Check className="w-3.5 h-3.5" />
+                                    <Check className="w-4 h-4 shrink-0" />
                                   )}
                                   <span>
                                     {approvingActivityId === selectedActivityDetail.id
@@ -10620,8 +10638,8 @@ export const TeacherDashboard: React.FC = () => {
                   {/* MODAL MẪU TRÒ CHƠI TƯƠNG TÁC (PHẦN D: 2 MẪU TƯƠNG TÁC) */}
                   {/* ========================================================= */}
                   {showGameModal && (
-                    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-                      <div className="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-7 space-y-5 border border-slate-200 shadow-2xl animate-fade-in my-8">
+                    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+                      <div className="bg-white rounded-3xl max-w-2xl w-full p-5 sm:p-7 border border-slate-200 shadow-2xl animate-fade-in my-6 max-h-[92vh] flex flex-col">
                         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                           <div className="flex items-center gap-2">
                             <Gamepad2 className="w-5 h-5 text-emerald-600" />
@@ -10642,7 +10660,9 @@ export const TeacherDashboard: React.FC = () => {
                           </button>
                         </div>
 
-                        {/* MẪU 1: GHÉP TỪ VỚI NGHĨA */}
+                        {/* Modal Body: Scrollable */}
+                        <div className="flex-1 overflow-y-auto space-y-4 pr-1 py-3">
+                          {/* MẪU 1: GHÉP TỪ VỚI NGHĨA */}
                         {gameModalType === 'word_meaning_match' && (
                           <div className="space-y-4">
                             <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-900">
@@ -10781,25 +10801,35 @@ export const TeacherDashboard: React.FC = () => {
                           </div>
                         )}
 
-                        <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
-                          <div className="text-[11px] text-amber-800 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200 font-medium">
-                            <strong>Lưu ý phạm vi Đợt 1:</strong> Mẫu học liệu tương tác dành cho giáo viên tổ chức tại lớp hoặc trình chiếu. Hệ thống chưa hỗ trợ học sinh tự chơi trực tuyến và lưu điểm độc lập trong phiên bản này.
+                        </div>
+
+                        {/* Modal Footer: Clean & Wide */}
+                        <div className="pt-4 border-t border-slate-100 flex flex-col gap-3 shrink-0">
+                          <div className="w-full text-xs text-amber-800 bg-amber-50 px-3.5 py-2.5 rounded-xl border border-amber-200 font-medium leading-relaxed">
+                            <strong>Lưu ý phạm vi Đợt 1:</strong> Mẫu học liệu tương tác dành cho giáo viên tổ chức tại lớp hoặc trình chiếu. Hệ thống sẽ lưu thành <strong>Bản nháp</strong> trong kho học liệu để thầy cô xem lại và duyệt trước khi sử dụng.
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="w-full flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5">
                             <button
                               type="button"
                               onClick={() => setShowGameModal(false)}
-                              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer text-xs"
+                              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer text-xs sm:text-sm text-center shrink-0"
                             >
                               Đóng
                             </button>
                             <button
                               type="button"
+                              disabled={savingGameTemplate}
                               onClick={() => handleSaveGameTemplateAsActivity()}
-                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition cursor-pointer text-xs flex items-center gap-1.5 shadow-xs"
+                              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition cursor-pointer text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs whitespace-nowrap shrink-0 disabled:opacity-50"
                             >
-                              <Save className="w-4 h-4" />
-                              <span>Lưu vào kho học liệu của tôi</span>
+                              {savingGameTemplate ? (
+                                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                              ) : (
+                                <Save className="w-4 h-4 shrink-0" />
+                              )}
+                              <span className="whitespace-nowrap">
+                                {savingGameTemplate ? 'Đang lưu bản nháp...' : 'Lưu bản nháp vào kho học liệu'}
+                              </span>
                             </button>
                           </div>
                         </div>

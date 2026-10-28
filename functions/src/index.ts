@@ -5904,8 +5904,46 @@ export const updateCurriculumProgress = functions.https.onCall(async (data, cont
 // 27. REMEDIATION ACTIVITIES LIFECYCLE (PHẦN 2 & 3: LƯU NHÁP, DUYỆT, QUẢN LÝ)
 // ==========================================
 
+async function canManageRemediationActivity(
+  callerUid: string,
+  callerRole: 'teacher' | 'admin',
+  existingData: any,
+  targetClassId?: string
+): Promise<boolean> {
+  if (callerRole === 'admin') return true;
+  if (
+    (existingData.teacherId && existingData.teacherId === callerUid) ||
+    (existingData.teacherUid && existingData.teacherUid === callerUid)
+  ) {
+    return true;
+  }
+  const classId = existingData.classId || targetClassId;
+  if (classId) {
+    try {
+      const classDoc = await db.collection('classes').doc(classId).get();
+      if (classDoc.exists) {
+        const classData = classDoc.data();
+        if (classData?.teacherUid === callerUid || classData?.teacherId === callerUid) {
+          return true;
+        }
+      }
+    } catch {}
+  }
+  if (existingData.teacherId) {
+    try {
+      const creatorDoc = await db.collection('users').doc(existingData.teacherId).get();
+      if (creatorDoc.exists && creatorDoc.data()?.role === 'admin') {
+        return true;
+      }
+    } catch {}
+  } else {
+    return true;
+  }
+  return false;
+}
+
 export const saveRemediationActivity = functions.https.onCall(async (data, context) => {
-  const teacherUid = await requireTeacher(context);
+  const { uid: callerUid, role: callerRole } = await requireTeacherOrAdmin(context);
 
   const {
     id,
@@ -5945,7 +5983,8 @@ export const saveRemediationActivity = functions.https.onCall(async (data, conte
   const now = Date.now();
   if (existingDoc.exists) {
     const existing = existingDoc.data()!;
-    if (existing.teacherId !== teacherUid && existing.teacherUid !== teacherUid) {
+    const allowed = await canManageRemediationActivity(callerUid, callerRole, existing, classId);
+    if (!allowed) {
       throw new functions.https.HttpsError(
         'permission-denied',
         'Bạn không có quyền chỉnh sửa hoạt động của giáo viên khác.'
@@ -5956,7 +5995,7 @@ export const saveRemediationActivity = functions.https.onCall(async (data, conte
   // Lấy tên giáo viên hiển thị
   let teacherName = 'Giáo viên';
   try {
-    const userSnap = await db.collection('users').doc(teacherUid).get();
+    const userSnap = await db.collection('users').doc(callerUid).get();
     if (userSnap.exists && userSnap.data()?.displayName) {
       teacherName = userSnap.data()?.displayName;
     }
@@ -5968,8 +6007,8 @@ export const saveRemediationActivity = functions.https.onCall(async (data, conte
 
   const activityRecord: RemediationActivity = {
     id: activityId,
-    teacherId: teacherUid,
-    teacherUid: teacherUid,
+    teacherId: callerRole === 'admin' ? (existingDoc.data()?.teacherId || callerUid) : callerUid,
+    teacherUid: callerRole === 'admin' ? (existingDoc.data()?.teacherUid || callerUid) : callerUid,
     teacherName: existingDoc.data()?.teacherName || teacherName,
     academicYear: academicYear || existingDoc.data()?.academicYear || '2026-2027',
     grade: Number(grade) || existingDoc.data()?.grade || 2,
@@ -6008,19 +6047,20 @@ export const saveRemediationActivity = functions.https.onCall(async (data, conte
 });
 
 export const approveRemediationActivity = functions.https.onCall(async (data, context) => {
-  const teacherUid = await requireTeacher(context);
+  const { uid: callerUid, role: callerRole } = await requireTeacherOrAdmin(context);
 
   const { activityId, updatedData } = data || {};
-  if (!activityId || typeof activityId !== 'string') {
+  const targetId = activityId || updatedData?.id;
+  if (!targetId || typeof targetId !== 'string') {
     throw new functions.https.HttpsError('invalid-argument', 'Mã hoạt động (activityId) không hợp lệ.');
   }
 
-  const activityRef = db.collection('remediationActivities').doc(activityId);
+  const activityRef = db.collection('remediationActivities').doc(targetId);
   const existingDoc = await activityRef.get();
 
   let teacherName = 'Giáo viên';
   try {
-    const userSnap = await db.collection('users').doc(teacherUid).get();
+    const userSnap = await db.collection('users').doc(callerUid).get();
     if (userSnap.exists && userSnap.data()?.displayName) {
       teacherName = userSnap.data()?.displayName;
     }
@@ -6033,7 +6073,8 @@ export const approveRemediationActivity = functions.https.onCall(async (data, co
 
   if (existingDoc.exists) {
     const existing = existingDoc.data()!;
-    if (existing.teacherId !== teacherUid && existing.teacherUid !== teacherUid) {
+    const allowed = await canManageRemediationActivity(callerUid, callerRole, existing, updatedData?.classId);
+    if (!allowed) {
       throw new functions.https.HttpsError('permission-denied', 'Bạn chỉ có thể phê duyệt hoạt động do mình quản lý.');
     }
     baseData = existing;
@@ -6059,10 +6100,10 @@ export const approveRemediationActivity = functions.https.onCall(async (data, co
 
   const approvedRecord: RemediationActivity = {
     ...merged,
-    id: activityId,
-    teacherId: teacherUid,
-    teacherUid: teacherUid,
-    teacherName: merged.teacherName || teacherName,
+    id: targetId,
+    teacherId: callerRole === 'admin' ? (merged.teacherId || callerUid) : callerUid,
+    teacherUid: callerRole === 'admin' ? (merged.teacherUid || callerUid) : callerUid,
+    teacherName: callerRole === 'admin' ? (merged.teacherName || teacherName) : teacherName,
     title: cleanTitle,
     skillObjective: cleanObjective,
     teacherSteps,
@@ -6071,7 +6112,7 @@ export const approveRemediationActivity = functions.https.onCall(async (data, co
     evaluationCriteria: String(merged.evaluationCriteria || '').trim(),
     status: 'approved',
     approvedAt: merged.approvedAt || now,
-    approvedBy: merged.approvedBy || teacherName,
+    approvedBy: teacherName,
     createdAt: baseData.createdAt || merged.createdAt || now,
     updatedAt: now
   };
@@ -6081,7 +6122,7 @@ export const approveRemediationActivity = functions.https.onCall(async (data, co
   return {
     success: true,
     activity: approvedRecord,
-    activityId,
+    activityId: targetId,
     status: 'approved',
     approvedAt: approvedRecord.approvedAt,
     approvedBy: approvedRecord.approvedBy,
@@ -6090,16 +6131,27 @@ export const approveRemediationActivity = functions.https.onCall(async (data, co
 });
 
 export const listRemediationActivities = functions.https.onCall(async (data, context) => {
-  const teacherUid = await requireTeacher(context);
+  const { uid: callerUid, role: callerRole } = await requireTeacherOrAdmin(context);
   const { classId, academicYear, grade, activityType, status } = data || {};
 
   const snap = await db.collection('remediationActivities').get();
   const activities: RemediationActivity[] = [];
 
+  const ownedClassIds = new Set<string>();
+  if (callerRole === 'teacher') {
+    try {
+      const classesSnap = await db.collection('classes').where('teacherUid', '==', callerUid).get();
+      classesSnap.forEach((cd) => ownedClassIds.add(cd.id));
+    } catch {}
+  }
+
   snap.forEach((doc) => {
     const act = doc.data() as RemediationActivity & { teacherUid?: string };
-    const isOwner = act.teacherId === teacherUid || act.teacherUid === teacherUid;
-    if (!isOwner) return;
+    const isDirectOwner = act.teacherId === callerUid || act.teacherUid === callerUid;
+    const isClassTeacher = act.classId && ownedClassIds.has(act.classId);
+    const isAdmin = callerRole === 'admin';
+
+    if (!isAdmin && !isDirectOwner && !isClassTeacher) return;
 
     if (classId && classId !== 'all' && act.classId && act.classId !== classId) {
       return;
@@ -6119,7 +6171,8 @@ export const listRemediationActivities = functions.https.onCall(async (data, con
 
     activities.push({
       ...act,
-      id: doc.id
+      id: doc.id,
+      teacherSteps: normalizeTeacherSteps(act.teacherSteps)
     } as RemediationActivity);
   });
 
@@ -6133,7 +6186,7 @@ export const listRemediationActivities = functions.https.onCall(async (data, con
 });
 
 export const deleteRemediationActivity = functions.https.onCall(async (data, context) => {
-  const teacherUid = await requireTeacher(context);
+  const { uid: callerUid, role: callerRole } = await requireTeacherOrAdmin(context);
   const { activityId } = data || {};
 
   if (!activityId) {
@@ -6148,7 +6201,8 @@ export const deleteRemediationActivity = functions.https.onCall(async (data, con
   }
 
   const actData = docSnap.data()!;
-  if (actData.teacherId !== teacherUid && actData.teacherUid !== teacherUid) {
+  const allowed = await canManageRemediationActivity(callerUid, callerRole, actData);
+  if (!allowed) {
     throw new functions.https.HttpsError('permission-denied', 'Bạn không có quyền xóa hoạt động này.');
   }
 

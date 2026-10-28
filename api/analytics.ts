@@ -13,7 +13,7 @@
  */
 
 import { getDb } from './_helpers/firebaseAdmin.js';
-import { handleApiError, requireTeacher } from './_helpers/authMiddleware.js';
+import { handleApiError, requireTeacher, requireTeacherOrAdmin } from './_helpers/authMiddleware.js';
 import { ApiError, VercelApiRequest, VercelApiResponse } from './_helpers/types.js';
 
 const SKILL_LABELS: Record<string, string> = {
@@ -1365,19 +1365,83 @@ BẮT BUỘC trả về định dạng JSON thuần dạng:
   };
 }
 
+/**
+ * Kiểm tra quyền quản lý / phê duyệt / xóa hoạt động sư phạm
+ */
+async function canManageRemediationActivity(
+  db: FirebaseFirestore.Firestore,
+  callerUid: string,
+  callerRole: 'teacher' | 'admin',
+  existingData: any,
+  targetClassId?: string
+): Promise<boolean> {
+  // 1. Quản trị viên (admin) có toàn quyền quản lý hệ thống
+  if (callerRole === 'admin') return true;
+
+  // 2. Giáo viên sở hữu trực tiếp hoạt động
+  if (
+    (existingData.teacherId && existingData.teacherId === callerUid) ||
+    (existingData.teacherUid && existingData.teacherUid === callerUid)
+  ) {
+    return true;
+  }
+
+  // 3. Giáo viên phụ trách lớp học của hoạt động này
+  const classId = existingData.classId || targetClassId;
+  if (classId) {
+    try {
+      const classDoc = await db.collection('classes').doc(classId).get();
+      if (classDoc.exists) {
+        const classData = classDoc.data();
+        if (classData?.teacherUid === callerUid || classData?.teacherId === callerUid) {
+          return true;
+        }
+      }
+    } catch {}
+  }
+
+  // 4. Nếu hoạt động do Admin tạo (mẫu học liệu chuẩn / bản nháp gợi ý cho lớp),
+  // cho phép giáo viên phụ trách tiếp nhận, chỉnh sửa và phê duyệt vào kho của mình
+  if (existingData.teacherId) {
+    try {
+      const creatorDoc = await db.collection('users').doc(existingData.teacherId).get();
+      if (creatorDoc.exists && creatorDoc.data()?.role === 'admin') {
+        return true;
+      }
+    } catch {}
+  } else {
+    return true;
+  }
+
+  return false;
+}
+
 // 4. LIST REMEDIATION ACTIVITIES
 async function handleListRemediationActivities(req: VercelApiRequest, data: any) {
-  const { uid: teacherUid } = await requireTeacher(req);
+  const { uid: callerUid, role: callerRole } = await requireTeacherOrAdmin(req);
   const { classId, academicYear, grade, activityType, status } = data || {};
   const db = getDb();
 
   const snap = await db.collection('remediationActivities').get();
   const activities: any[] = [];
 
+  // Danh sách các lớp do giáo viên này phụ trách
+  const ownedClassIds = new Set<string>();
+  if (callerRole === 'teacher') {
+    try {
+      const classesSnap = await db.collection('classes').where('teacherUid', '==', callerUid).get();
+      classesSnap.forEach((cd) => ownedClassIds.add(cd.id));
+    } catch {}
+  }
+
   snap.forEach((doc) => {
     const act = doc.data() as any;
-    const isOwner = act.teacherId === teacherUid || act.teacherUid === teacherUid;
-    if (!isOwner) return;
+    const isDirectOwner = act.teacherId === callerUid || act.teacherUid === callerUid;
+    const isClassTeacher = act.classId && ownedClassIds.has(act.classId);
+    const isAdmin = callerRole === 'admin';
+
+    // Chỉ hiển thị hoạt động nếu là admin, chủ sở hữu hoặc giáo viên phụ trách lớp
+    if (!isAdmin && !isDirectOwner && !isClassTeacher) return;
 
     if (classId && classId !== 'all' && act.classId && act.classId !== classId) return;
     if (academicYear && academicYear !== 'all' && act.academicYear && act.academicYear !== academicYear) return;
@@ -1398,7 +1462,7 @@ async function handleListRemediationActivities(req: VercelApiRequest, data: any)
 
 // 5. SAVE REMEDIATION ACTIVITY
 async function handleSaveRemediationActivity(req: VercelApiRequest, data: any) {
-  const { uid: teacherUid } = await requireTeacher(req);
+  const { uid: callerUid, role: callerRole } = await requireTeacherOrAdmin(req);
   const rawActivity = (data && data.activity) ? data.activity : data;
   if (!rawActivity || typeof rawActivity !== 'object') {
     throw new ApiError(400, 'invalid-argument', 'Dữ liệu hoạt động không được để trống.');
@@ -1419,14 +1483,15 @@ async function handleSaveRemediationActivity(req: VercelApiRequest, data: any) {
 
   if (existingDoc.exists) {
     const existing = existingDoc.data()!;
-    if (existing.teacherId && existing.teacherId !== teacherUid && existing.teacherUid !== teacherUid) {
+    const allowed = await canManageRemediationActivity(db, callerUid, callerRole, existing, rawActivity.classId);
+    if (!allowed) {
       throw new ApiError(403, 'permission-denied', 'Bạn không có quyền chỉnh sửa hoạt động của giáo viên khác.');
     }
   }
 
   let teacherName = 'Giáo viên';
   try {
-    const userDoc = await db.collection('users').doc(teacherUid).get();
+    const userDoc = await db.collection('users').doc(callerUid).get();
     if (userDoc.exists && userDoc.data()?.displayName) {
       teacherName = userDoc.data()?.displayName;
     }
@@ -1438,8 +1503,8 @@ async function handleSaveRemediationActivity(req: VercelApiRequest, data: any) {
   const activityRecord = {
     ...rawActivity,
     id: activityId,
-    teacherId: teacherUid,
-    teacherUid: teacherUid,
+    teacherId: callerRole === 'admin' ? (rawActivity.teacherId || callerUid) : callerUid,
+    teacherUid: callerRole === 'admin' ? (rawActivity.teacherUid || callerUid) : callerUid,
     teacherName: existingDoc.data()?.teacherName || rawActivity.teacherName || teacherName,
     title: cleanTitle,
     academicYear: rawActivity.academicYear || existingDoc.data()?.academicYear || '2026-2027',
@@ -1479,7 +1544,7 @@ async function handleSaveRemediationActivity(req: VercelApiRequest, data: any) {
 
 // 6. APPROVE REMEDIATION ACTIVITY
 async function handleApproveRemediationActivity(req: VercelApiRequest, data: any) {
-  const { uid: teacherUid } = await requireTeacher(req);
+  const { uid: callerUid, role: callerRole } = await requireTeacherOrAdmin(req);
   const { activityId, updatedData } = data || {};
   const targetId = activityId || updatedData?.id;
   if (!targetId || typeof targetId !== 'string') {
@@ -1492,7 +1557,7 @@ async function handleApproveRemediationActivity(req: VercelApiRequest, data: any
 
   let teacherName = 'Giáo viên';
   try {
-    const userDoc = await db.collection('users').doc(teacherUid).get();
+    const userDoc = await db.collection('users').doc(callerUid).get();
     if (userDoc.exists && userDoc.data()?.displayName) {
       teacherName = userDoc.data()?.displayName;
     }
@@ -1503,7 +1568,8 @@ async function handleApproveRemediationActivity(req: VercelApiRequest, data: any
 
   if (existingDoc.exists) {
     const existing = existingDoc.data()!;
-    if (existing.teacherId && existing.teacherId !== teacherUid && existing.teacherUid !== teacherUid) {
+    const allowed = await canManageRemediationActivity(db, callerUid, callerRole, existing, updatedData?.classId);
+    if (!allowed) {
       throw new ApiError(403, 'permission-denied', 'Bạn chỉ có thể phê duyệt hoạt động do mình quản lý.');
     }
     baseData = existing;
@@ -1528,9 +1594,9 @@ async function handleApproveRemediationActivity(req: VercelApiRequest, data: any
   const approvedRecord = {
     ...merged,
     id: targetId,
-    teacherId: teacherUid,
-    teacherUid: teacherUid,
-    teacherName: merged.teacherName || teacherName,
+    teacherId: callerRole === 'admin' ? (merged.teacherId || callerUid) : callerUid,
+    teacherUid: callerRole === 'admin' ? (merged.teacherUid || callerUid) : callerUid,
+    teacherName: callerRole === 'admin' ? (merged.teacherName || teacherName) : teacherName,
     title: cleanTitle,
     skillObjective: cleanObjective,
     teacherSteps,
@@ -1554,16 +1620,23 @@ async function handleApproveRemediationActivity(req: VercelApiRequest, data: any
 
 // 7. DELETE REMEDIATION ACTIVITY
 async function handleDeleteRemediationActivity(req: VercelApiRequest, data: any) {
-  const { uid: teacherUid } = await requireTeacher(req);
+  const { uid: callerUid, role: callerRole } = await requireTeacherOrAdmin(req);
   const { activityId } = data || {};
   if (!activityId) throw new ApiError(400, 'invalid-argument', 'Mã hoạt động không được để trống.');
 
   const db = getDb();
   const ref = db.collection('remediationActivities').doc(activityId);
-  const doc = await ref.get();
-  if (doc.exists && (doc.data()?.teacherUid === teacherUid || doc.data()?.teacherId === teacherUid)) {
-    await ref.delete();
+  const existingDoc = await ref.get();
+  if (!existingDoc.exists) {
+    throw new ApiError(404, 'not-found', 'Hoạt động cần xóa không tồn tại.');
   }
 
-  return { success: true, message: 'Đã xóa hoạt động củng cố.' };
+  const existing = existingDoc.data()!;
+  const allowed = await canManageRemediationActivity(db, callerUid, callerRole, existing);
+  if (!allowed) {
+    throw new ApiError(403, 'permission-denied', 'Bạn không có quyền xóa hoạt động này.');
+  }
+
+  await ref.delete();
+  return { success: true, activityId, message: 'Đã xóa hoạt động củng cố thành công.' };
 }
