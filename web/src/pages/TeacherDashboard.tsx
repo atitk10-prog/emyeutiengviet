@@ -5345,15 +5345,15 @@ export const TeacherDashboard: React.FC = () => {
           return ls.grade === navLessonGrade;
         });
 
-        // 3. Filter by Nav Semester
+        // 3. Filter by Nav Semester (fallback to 1 if not specified)
         const semLessons = gradeLessons.filter((ls) => {
           if (navLessonSemester === null) return true;
-          return ls.semester === navLessonSemester;
+          return ((ls.semester as number) || 1) === navLessonSemester;
         });
 
         // 4. Filter Displayed Lessons (when week is chosen or "all" in semester)
         const displayedLessons = semLessons.filter((ls) => {
-          if (navLessonWeek !== null && navLessonWeek !== 'all' && ls.week !== navLessonWeek) return false;
+          if (navLessonWeek !== null && navLessonWeek !== 'all' && ((ls.week as number) || 1) !== navLessonWeek) return false;
           const st = ls.status || 'published';
           if (lessonFilterStatus !== 'all' && st !== lessonFilterStatus) return false;
           if (lessonSearch.trim()) {
@@ -5743,7 +5743,7 @@ export const TeacherDashboard: React.FC = () => {
                   const availableSemesters = Array.from(
                     new Set(
                       gradeLessons
-                        .map((ls) => ls.semester)
+                        .map((ls) => ((ls.semester as number) || 1) as 1 | 2)
                         .filter((s): s is 1 | 2 => s === 1 || s === 2)
                     )
                   ).sort((a, b) => a - b);
@@ -5759,7 +5759,7 @@ export const TeacherDashboard: React.FC = () => {
                   return (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                       {availableSemesters.map((sem) => {
-                        const sl = gradeLessons.filter((ls) => ls.semester === sem);
+                        const sl = gradeLessons.filter((ls) => ((ls.semester as number) || 1) === sem);
                         const semWeeks = Array.from(new Set(sl.map((l) => l.week))).sort((a, b) => (a || 0) - (b || 0));
 
                         return (

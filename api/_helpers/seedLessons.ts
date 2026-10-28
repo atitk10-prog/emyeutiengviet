@@ -33,6 +33,9 @@ export interface SeedLesson {
   title: string;
   topic: string;
   grade: number;
+  semester?: 1 | 2;
+  week?: number;
+  academicYearScope?: 'shared' | 'specific';
   passage: string;
   vocabulary: SeedVocabulary[];
   questions: SeedQuestion[];
