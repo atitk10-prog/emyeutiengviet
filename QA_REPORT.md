@@ -111,3 +111,84 @@ Tuân thủ nghiêm ngặt theo đặc tả `EMYTV_RELEASE_GATES.md`:
 - **[J] Xác nhận triển khai Production Vercel:** Commit `62db3e2` và `7e83883` đã được triển khai lên Production alias `https://emyeutiengviet-zeta.vercel.app` với bundle JS `index-Bh3CrFcu.js`.
 
 **KẾT LUẬN CUỐI CÙNG: HỆ THỐNG ĐÃ SẴN SÀNG QUAY VIDEO VÀ TRÌNH DIỄN THỰC TẾ.**
+
+---
+
+## 7. Báo cáo khắc phục P0 – Duyệt học liệu củng cố, Lưu mẫu trò chơi và Chuẩn hóa giao diện nút (28/10/2026)
+
+### 7.1. Bối cảnh và Tái hiện lỗi trên Production
+- **Môi trường:** Vercel Production (`emyeutiengviet-zeta.vercel.app`) + Firebase Cloud Firestore (`emyeutiengviet-prod`).
+- **Hiện tượng 1:** Kho hoạt động củng cố có 4 bản nháp, 0 hoạt động đã duyệt. Giáo viên nhấn "Duyệt & Đưa vào kho" thất bại.
+  - *Ghi nhận kỹ thuật:* Khi gọi API `POST /api/analytics` với `action: 'approveRemediationActivity'`, server trả về **HTTP 403** với mã lỗi `permission-denied`:
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "permission-denied",
+        "message": "Bạn chỉ có thể phê duyệt hoạt động do mình quản lý."
+      }
+    }
+    ```
+  - *Nguyên nhân:* Các hoạt động mẫu trong Firestore mang `teacherId: 'fts9esJAKjfOpbABTPF7ru5dgdz1'` (tài khoản Quản trị viên khởi tạo) nhưng gán cho `classId: 'class_2b'`. Trong `api/analytics.ts` và `functions/src/index.ts`, backend kiểm tra quyền sở hữu cứng: `if (existing.teacherId !== teacherUid) throw new ApiError(403)`. Khi giáo viên phụ trách lớp `class_2b` (`giaovien01`) thực hiện duyệt hoặc chỉnh sửa, hệ thống chặn quyền. Ngoài ra, vai trò Admin cũng bị từ chối nếu không trùng `teacherId`.
+- **Hiện tượng 2:** Trong cửa sổ trò chơi "Sắp xếp trình tự câu chuyện", nút "Lưu vào kho học liệu của tôi" bị phần ghi chú ép thành cột hẹp, chữ xếp dọc, giao diện vỡ trên các màn hình có độ phân giải khác nhau.
+
+---
+
+### 7.2. Giải pháp kỹ thuật đã triển khai
+
+#### 1. Sửa quyền phê duyệt và quản lý học liệu củng cố (`api/analytics.ts` & `functions/src/index.ts`)
+- Bổ sung helper phân quyền đa tầng `canManageRemediationActivity(db, callerUid, callerRole, existingData, targetClassId)`:
+  - **Admin:** Có toàn quyền xem, duyệt, sửa và lưu trữ mọi hoạt động củng cố.
+  - **Chủ sở hữu trực tiếp:** Cho phép người tạo (`teacherId === callerUid` hoặc `teacherUid === callerUid`).
+  - **Giáo viên phụ trách lớp:** Nếu hoạt động thuộc về một lớp (`classId`), kiểm tra `classes/{classId}` có `teacherUid === callerUid` thì giáo viên đó có đầy đủ quyền sư phạm để tiếp nhận, tinh chỉnh và phê duyệt vào kho của mình.
+  - **Học liệu mẫu chuẩn từ Admin:** Cho phép giáo viên tiếp nhận các bản nháp/mẫu do hệ thống tạo cho lớp mình để hoàn thiện hồ sơ học liệu.
+- Cập nhật đồng bộ các hành động: `listRemediationActivities`, `saveRemediationActivity`, `approveRemediationActivity`, và `deleteRemediationActivity`.
+- Khi phê duyệt thành công: ghi nhận `status: 'approved'`, `approvedAt: Date.now()`, `approvedBy: teacherName`.
+
+#### 2. Sửa luồng Lưu mẫu trò chơi tương tác (`web/src/pages/TeacherDashboard.tsx`)
+- Thêm state bảo vệ chống submit lặp: `savingGameTemplate`.
+- Chuyển `handleSaveActivityDraft` sang trả về `Promise<boolean>` biểu thị trạng thái lưu thật từ máy chủ.
+- Trong `handleSaveGameTemplateAsActivity`:
+  - Kiểm tra `if (savingGameTemplate) return;` chống nhấn đúp.
+  - Cấp mã hoạt động mới duy nhất (`act_game_${Date.now()}_...`), tuyệt đối **không dùng lại ID hoạt động nguồn**.
+  - Thiết lập rõ ràng `status: 'draft'`, `approvedAt: null`, `approvedBy: null`.
+  - Hiển thị spinner và trạng thái `Đang lưu bản nháp...`.
+  - **Chỉ đóng popup khi lưu thành công vào Firestore** (`if (success) { setShowGameModal(false); }`), giữ nguyên dữ liệu nếu có lỗi mạng.
+
+#### 3. Tối ưu hóa UI/UX và Layout nút bấm
+- Cửa sổ Game Modal được tái cấu trúc theo mô hình flex container linh hoạt:
+  - Container chính: `max-h-[92vh] flex flex-col`.
+  - Phần thân: `flex-1 overflow-y-auto` cuộn mượt mà trên mọi thiết bị.
+  - Phần chân (Footer): tách riêng phần ghi chú định hướng sư phạm lên trên với nền vàng nhạt `bg-amber-50 border-amber-200`, không còn nằm cùng hàng ép hẹp các nút.
+  - Cụm nút hành động: bố trí ngang trên Desktop (`justify-end gap-2.5`) và xếp dọc trên Mobile 375px (`flex-col-reverse`), độ rộng nút tối ưu, chữ nằm ngang (`whitespace-nowrap shrink-0`), có icon `Save` và `Check` chuyên nghiệp.
+  - Kiểm thử responsive chuẩn xác tại 4 mốc: **375px (Mobile)**, **768px (Tablet)**, **1366px (Laptop)**, **1920px (Desktop Full HD)**.
+
+---
+
+### 7.3. Kết quả nghiệm thu thực tế (8/8 tiêu chí ĐẠT)
+
+1. **Lưu mẫu trò chơi mới thành bản nháp:**
+   - ĐÃ KIỂM CHỨNG PASS: Tạo bản nháp trò chơi "Trò chơi: Sắp xếp trình tự sự việc (Kiểm định P0)" với ID `act_game_1793185501718`.
+   - Phản hồi HTTP 200, status `'draft'`, lưu trọn vẹn 3 bước sư phạm và học liệu.
+2. **Xác nhận Firestore có bản ghi mới:**
+   - ĐÃ KIỂM CHỨNG PASS: Document `remediationActivities/act_game_1793185501718` tồn tại thật trên Firestore Production `emyeutiengviet-prod`.
+3. **Phê duyệt bản nháp đó:**
+   - ĐÃ KIỂM CHỨNG PASS: Gọi `approveRemediationActivity` trả về HTTP 200, status `'approved'`, `approvedBy: "Cô giáo Thanh Tâm"`, `approvedAt: 1793185503128`.
+4. **Kiểm tra biến động số lượng:**
+   - Trước kiểm thử: 4 bản nháp, 0 đã duyệt.
+   - Sau kiểm thử: Bản nháp giảm còn 3, số đã duyệt tăng lên 2.
+5. **Kiểm tra tính bền vững sau F5:**
+   - ĐÃ KIỂM CHỨNG PASS: Tải lại trang (F5), các hoạt động đã duyệt vẫn giữ nguyên vị trí trong tab "Đã duyệt trong kho", badge xanh `✓ Đã duyệt trong kho` hiển thị tức thì từ Firestore.
+6. **Kiểm tra nội dung, các bước tổ chức và học liệu:**
+   - ĐÃ KIỂM CHỨNG PASS: Cả 3-4 bước sư phạm phân hóa (BƯỚC 1, BƯỚC 2, BƯỚC 3, BƯỚC 4), Chuẩn bị học liệu và Tiêu chí đạt hiển thị đầy đủ, không bị cắt xén.
+7. **Kiểm thử trên máy tính và điện thoại:**
+   - ĐÃ KIỂM CHỨNG PASS:
+     - 1920px: Bố cục rộng, cân đối, nút nằm ngang chuẩn mực.
+     - 1366px: Hiển thị tối ưu (`game_modal_1366_1793185810839.png`).
+     - 768px: Tự động co giãn phù hợp giao diện máy tính bảng (`game_modal_768_1793185816587.png`).
+     - 375px: Nút kéo dài full-width, dễ thao tác chạm cảm ứng, thanh cuộn hoạt động trơn tru (`game_modal_375_1793185821567.png`).
+8. **Build & Deploy Production:**
+   - Commit: `3fa6012` (*fix(p0): fix remediation activity approval permission, game template saving, and button layouts*).
+   - TypeScript build: `tsc` PASS (0 errors trên cả `web` và `functions`).
+   - Vercel Deployment: `https://emyeutiengviet-625oyxzi0-tinhs-projects-2f14d110.vercel.app` gắn alias Production chính thức `https://emyeutiengviet-zeta.vercel.app`.
+
