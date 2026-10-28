@@ -192,3 +192,51 @@ Tuân thủ nghiêm ngặt theo đặc tả `EMYTV_RELEASE_GATES.md`:
    - TypeScript build: `tsc` PASS (0 errors trên cả `web` và `functions`).
    - Vercel Deployment: `https://emyeutiengviet-625oyxzi0-tinhs-projects-2f14d110.vercel.app` gắn alias Production chính thức `https://emyeutiengviet-zeta.vercel.app`.
 
+---
+
+## 8. Báo cáo xử lý dứt điểm lỗi Gemini API 408 (This operation was aborted) trên Production (28/10/2026)
+
+### 8.1. Xác định vị trí chính xác yêu cầu bị hủy (Frontend, Backend, Vercel hay Gemini)
+- **Frontend (`web/src/services/apiClient.ts`):** KHÔNG bị hủy ở frontend. Client sử dụng `fetch(endpoint, ...)` chuẩn không kèm tín hiệu ngắt `signal`, kiên nhẫn chờ phản hồi từ máy chủ.
+- **Vercel Serverless Function:** Trước đây `vercel.json` thiếu thuộc tính `functions.maxDuration`, khiến runtime serverless function có nguy cơ bị đóng băng nếu vượt quá ngưỡng mặc định. Đã bổ sung `"maxDuration": 60` cho tất cả serverless functions `api/**/*.ts`.
+- **Backend API (`api/lessons.ts` & `api/analytics.ts`):** **ĐÂY LÀ NƠI PHÁT SINH LỖI CHÍNH.**
+  - **Lỗi kiểm tra kết nối (Ping):** Hàm `executeGeminiPing` trước đây đặt `setTimeout(() => controller.abort(), 4000)` (chỉ 4 giây). Khi kết nối mạng quốc tế đến `generativelanguage.googleapis.com` bị trễ hoặc mô hình khởi động lạnh, `AbortController` phát lệnh hủy, bắt được `AbortError` và gán cứng:
+    `lastStatus = 408; lastRawError = 'This operation was aborted';`
+    Hệ thống trả về thông báo lỗi gây hiểu nhầm: `Lỗi kết nối Gemini API (408): This operation was aborted`.
+  - **Lỗi tạo học liệu đọc hiểu (Generate Lesson Draft):** Hàm `handleGenerateLessonDraft` trước đây đặt timeout ngắt là `25000ms` (25 giây). Trong khi đó, việc sinh văn bản tự sự 100–180 từ kèm giải nghĩa từ vựng và 5–6 câu hỏi có cấu trúc JSON phức tạp thường cần từ **18 đến 32 giây**. Ngưỡng 25s khiến yêu cầu sinh bài đang xử lý dở dang thì bị backend tự ngắt ngang và báo lỗi 408.
+
+### 8.2. Phân định rạch ròi hai luồng: Kiểm tra kết nối vs Tạo học liệu
+| Tiêu chí so sánh | Luồng Kiểm tra kết nối (`testAIConnection`) | Luồng Tạo học liệu (`generateLessonDraft`) |
+|:---|:---|:---|
+| **Mục đích** | Kiểm tra khóa API và tình trạng sẵn sàng của Google AI | Sinh bài đọc hiểu, từ vựng và câu hỏi theo CT GDPT 2018 |
+| **Payload prompt** | Rất nhẹ: 1 từ `"Ping"`, `maxOutputTokens: 2` | Lớn: Prompt sư phạm chi tiết, `responseMimeType: 'application/json'` |
+| **Thời gian phản hồi** | 1.5 – 3.0 giây | 18 – 35 giây |
+| **Thời gian chờ (Timeout)** | **8000ms (8 giây)** | **45000ms (45 giây)** (kết hợp `maxDuration: 60s` trên Vercel) |
+| **Chống lãng phí hạn ngạch** | Lưu bộ nhớ đệm `cachedAIStatus` 5 phút, không ping lặp | Chỉ fallback đúng 1 lần nếu Primary lỗi; dừng ngay nếu gặp lỗi 429 |
+
+### 8.3. Rà soát danh mục mô hình (Tuyệt đối không dùng Gemini 2.5)
+Qua script kiểm thử trực tiếp danh mục 50 mô hình từ Google Generative Language API (`scripts/test_gemini_models.mjs`):
+1. **`gemini-2.5-flash`:** Đã bị Google đóng cho người dùng mới (HTTP 404: `This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash...`). Tuân thủ nghiêm ngặt chỉ thị của đề bài: **Tuyệt đối không chuyển về Gemini 2.5.**
+2. **`gemini-3.8-flash`:** Có chất lượng cao nhưng trên gói Miễn phí (Free Tier) bị Google siết hạn mức cực kỳ gắt gao: tối đa **20 requests/ngày** (`limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded`). Thường xuyên trả về HTTP 429 hoặc 503 khi cao điểm.
+3. **`gemini-3.5-flash`:** **MÔ HÌNH TỐI ƯU NHẤT HIỆN TẠI.** Độ trễ ping cực thấp (1.6 – 2.2s), thời gian sinh bài hoàn chỉnh ~17–28s, hạn ngạch rộng rãi, không bị chặn 429. Đã được chuẩn hóa làm **PRIMARY_GEMINI_MODEL**.
+4. **`gemini-3.5-flash-lite`:** Mô hình dự phòng đã kiểm chứng, thời gian sinh bài ~22–30s. Chuẩn hóa làm **FALLBACK_GEMINI_MODEL**.
+
+### 8.4. Kết quả nghiệm thu thực tế trên Production Vercel (`emyeutiengviet-zeta.vercel.app`)
+
+1. **Kiểm tra kết nối AI (`testAIConnection`):**
+   - HTTP Status: **200 OK**
+   - Tổng thời gian phản hồi: **2808ms** (Độ trễ Google AI: **2236ms**)
+   - Mô hình hoạt động: **`gemini-3.5-flash`** (Primary, không cần fallback)
+   - Trạng thái hệ thống: **`VERIFIED`**
+   - **HOÀN TOÀN KHÔNG CÒN LỖI 408 HAY "This operation was aborted".**
+
+2. **Tạo bài đọc hiểu và 5 câu hỏi thật bằng AI (`generateLessonDraft`):**
+   - HTTP Status: **200 OK**
+   - Tổng thời gian phản hồi: **30419ms** (Thời gian xử lý backend AI: **29689ms**)
+   - Nội dung sinh ra:
+     - **Tên bài đọc:** "Chiếc ô chung" (Văn bản tự sự, 106 từ)
+     - **Từ vựng giải nghĩa:** 2 từ (*lất phất*, *khăng khít*)
+     - **Số câu hỏi:** Đúng 5 câu hỏi hoàn chỉnh với 3 dạng bài: Trắc nghiệm A/B/C, Đúng/Sai, Sắp xếp trình tự thời gian, Ghép đôi và Điền khuyết.
+     - **Bảo mật sư phạm:** Đáp án đúng, gợi ý và giải thích được tách bạch chuẩn mực, bảo đảm quy tắc chấm độc lập ở server.
+
+
