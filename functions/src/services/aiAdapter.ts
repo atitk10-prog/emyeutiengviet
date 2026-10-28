@@ -22,8 +22,10 @@ import {
 // 1. MODEL DEFINITIONS & LOCAL SECRETS LOADER
 // ==========================================
 
-export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
-export const HIGH_QUALITY_GEMINI_MODEL = 'gemini-3.8-flash';
+export const PRIMARY_GEMINI_MODEL = 'gemini-3.8-flash';
+export const FALLBACK_GEMINI_MODEL = 'gemini-3.5-flash-lite';
+export const DEFAULT_GEMINI_MODEL = PRIMARY_GEMINI_MODEL;
+export const HIGH_QUALITY_GEMINI_MODEL = PRIMARY_GEMINI_MODEL;
 
 // Attempt to load GEMINI_API_KEY and GEMINI_MODEL from local config files if in development / emulator
 function loadLocalSecrets(): void {
@@ -475,10 +477,12 @@ ${req.customVocabulary && req.customVocabulary.length > 0 ? `Từ vựng cần l
    - Đối với hành động miêu tả chăm sóc cây: Sử dụng từ ngữ chính xác, tự nhiên theo chuẩn tiếng Việt (ví dụ: 'ngắt bỏ lá sâu trên cành', 'nhặt những chiếc lá úa rơi rụng dưới đất'; TUYỆT ĐỐI KHÔNG dùng câu mâu thuẫn hay ngô nghê như 'vặt bỏ lá úa rơi rụng dưới đất').
    - Ngữ pháp: Câu ngắn gọn (mỗi câu không quá 18-20 từ), ngắt nghỉ rõ ràng, đúng chính tả tiếng Việt.
 3. Từ vựng (vocabulary): 2 đến 3 từ khó hoặc từ ngữ đặc sắc trong bài, kèm nghĩa ngắn gọn và ví dụ minh họa gần gũi với học sinh.
-4. Câu hỏi đọc hiểu: Đúng ${questionCount} câu hỏi được phân bổ đủ 3 dạng:
-   - Dạng 'multiple_choice': Đúng 3 phương án A, B, C (options là mảng 3 chuỗi). 'answer' là 'A' hoặc 'B' hoặc 'C'.
+4. Câu hỏi đọc hiểu: Đúng ${questionCount} câu hỏi được phân bổ trong 5 dạng câu hỏi:
+   - Dạng 'multiple_choice': Đúng 3 phương án A, B, C (options là mảng 3 chuỗi sạch). 'answer' là 'A' hoặc 'B' hoặc 'C'.
    - Dạng 'true_false': Có 'statement' nhận định. 'answer' là true hoặc false.
    - Dạng 'sequence': Sắp xếp 3 sự việc chính trong bài. 'items' là mảng 3 chuỗi. 'answer' là mảng 3 chuỗi theo đúng thứ tự thời gian chuẩn.
+   - Dạng 'matching': Ghép đôi 3 đối tượng (từ với nghĩa, hoặc sự việc với nội dung). 'leftItems' là mảng 3 chuỗi, 'rightItems' là mảng 3 chuỗi, 'matchingPairs' là object { [chuỗi trái]: chuỗi phải tương ứng }, 'answer' là matchingPairs này.
+   - Dạng 'fill_blank': Điền khuyết 1-2 từ. 'prompt' hoặc 'blankContext' có [ ... ], 'answer' là từ/cụm từ đúng, 'acceptedAnswers' là mảng 1-3 cách diễn đạt tương đương được chấp nhận.
 5. Mỗi câu hỏi PHẢI có:
    - id: chuỗi 'q1', 'q2', ...
    - prompt: lời dẫn câu hỏi
@@ -519,6 +523,9 @@ Bắt buộc CHỈ trả về DUY NHẤT một chuỗi JSON hợp lệ tuân th�
   let responseText: string;
   const startTime = Date.now();
 
+  let usedModelName = modelName;
+  let fallbackUsed = false;
+
   try {
     const model = genAI.getGenerativeModel({
       model: modelName,
@@ -526,30 +533,43 @@ Bắt buộc CHỈ trả về DUY NHẤT một chuỗi JSON hợp lệ tuân th�
     });
     const result = await model.generateContent(prompt);
     responseText = result.response.text();
-
-    // Mark as verified on successful lesson generation
-    verificationState = {
-      verified: true,
-      verifiedAt: Date.now(),
-      latencyMs: Date.now() - startTime,
-      modelUsed: modelName,
-      lastError: null
-    };
   } catch (err: any) {
-    const classified = classifyAIError(err);
-    verificationState = {
-      verified: false,
-      verifiedAt: null,
-      latencyMs: null,
-      modelUsed: modelName,
-      lastError: {
-        code: classified.code,
-        message: classified.cleanMessage,
-        timestamp: Date.now()
-      }
-    };
-    throw new Error(`Lỗi gọi Gemini AI (${modelName} - ${classified.code}): ${classified.cleanMessage}`);
+    const primaryErrorMsg = err.message || String(err);
+    console.warn(`[Gemini AI Functions] Primary model "${modelName}" failed: ${primaryErrorMsg}. Switching to verified fallback model "${FALLBACK_GEMINI_MODEL}"...`);
+    usedModelName = FALLBACK_GEMINI_MODEL;
+    fallbackUsed = true;
+    try {
+      const fbModel = genAI.getGenerativeModel({
+        model: FALLBACK_GEMINI_MODEL,
+        generationConfig: { responseMimeType: 'application/json' }
+      });
+      const fbResult = await fbModel.generateContent(prompt);
+      responseText = fbResult.response.text();
+    } catch (fbErr: any) {
+      const classified = classifyAIError(fbErr);
+      verificationState = {
+        verified: false,
+        verifiedAt: null,
+        latencyMs: null,
+        modelUsed: FALLBACK_GEMINI_MODEL,
+        lastError: {
+          code: classified.code,
+          message: classified.cleanMessage,
+          timestamp: Date.now()
+        }
+      };
+      throw new Error(`Cả mô hình chính (${modelName}) và dự phòng (${FALLBACK_GEMINI_MODEL}) đều lỗi: ${classified.cleanMessage}`);
+    }
   }
+
+  // Mark as verified on successful lesson generation
+  verificationState = {
+    verified: true,
+    verifiedAt: Date.now(),
+    latencyMs: Date.now() - startTime,
+    modelUsed: usedModelName,
+    lastError: null
+  };
 
   let parsed: any;
   try {

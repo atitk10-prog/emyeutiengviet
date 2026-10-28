@@ -414,9 +414,19 @@ async function handleSubmitAnswer(req: VercelApiRequest, data: any) {
     throw new ApiError(404, 'not-found', `Không tìm thấy câu hỏi ${questionId} trong đáp án.`);
   }
 
-  // Retrieve question metadata (options, items, type) for robust canonical evaluation
-  let qMeta: any = { type: qDetail.type, options: qDetail.options, items: qDetail.items };
-  if ((!qMeta.options || qMeta.options.length === 0) && att.lessonId && att.lessonVersionId) {
+  // Retrieve question metadata (options, items, matching, fill_blank, type) for robust canonical evaluation
+  let qMeta: any = {
+    type: qDetail.type,
+    options: qDetail.options,
+    items: qDetail.items,
+    leftItems: qDetail.leftItems,
+    rightItems: qDetail.rightItems,
+    blankContext: qDetail.blankContext,
+    acceptedAnswers: qDetail.acceptedAnswers,
+    matchingPairs: qDetail.matchingPairs
+  };
+
+  if (att.lessonId && att.lessonVersionId) {
     try {
       const vDoc = await db
         .collection('lessons')
@@ -432,6 +442,11 @@ async function handleSubmitAnswer(req: VercelApiRequest, data: any) {
             type: found.type || qDetail.type,
             options: found.options || qDetail.options,
             items: found.items || qDetail.items,
+            leftItems: found.leftItems || qDetail.leftItems,
+            rightItems: found.rightItems || qDetail.rightItems,
+            blankContext: found.blankContext || qDetail.blankContext,
+            acceptedAnswers: qDetail.acceptedAnswers || found.acceptedAnswers,
+            matchingPairs: qDetail.matchingPairs || found.matchingPairs,
             statement: found.statement,
             prompt: found.prompt
           };

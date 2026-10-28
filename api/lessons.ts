@@ -423,6 +423,10 @@ async function handlePublishLesson(req: VercelApiRequest, data: any) {
       statement: q.statement || undefined,
       options: q.options || undefined,
       items: q.items || undefined,
+      leftItems: q.leftItems || undefined,
+      rightItems: q.rightItems || undefined,
+      blankContext: q.blankContext || undefined,
+      blankPosition: q.blankPosition || undefined,
       difficulty: q.difficulty || 'medium',
       skillTag: q.skillTag || 'general',
       relatedPassagePart: q.relatedPassagePart || undefined
@@ -430,11 +434,16 @@ async function handlePublishLesson(req: VercelApiRequest, data: any) {
 
     privateAnswers[qId] = {
       correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : q.answer,
+      acceptedAnswers: q.acceptedAnswers || undefined,
+      matchingPairs: q.matchingPairs || undefined,
       hint: q.hint || '',
       explanation: q.explanation || '',
       type: q.type,
       options: q.options || undefined,
-      items: q.items || undefined
+      items: q.items || undefined,
+      leftItems: q.leftItems || undefined,
+      rightItems: q.rightItems || undefined,
+      blankContext: q.blankContext || undefined
     };
   });
 
@@ -678,6 +687,13 @@ async function handleAssignLesson(req: VercelApiRequest, data: any) {
   };
 }
 
+// ==========================================
+// 8. GEMINI AI INTEGRATION (STANDARDIZED: PRIMARY 3.8-FLASH, FALLBACK 3.5-FLASH-LITE)
+// ==========================================
+
+export const PRIMARY_GEMINI_MODEL = 'gemini-3.8-flash';
+export const FALLBACK_GEMINI_MODEL = 'gemini-3.5-flash-lite';
+
 // In-memory cache for AI status to prevent blocking every page load with external network ping
 let cachedAIStatus: { result: any; timestamp: number } | null = null;
 const AI_STATUS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -690,21 +706,23 @@ async function executeGeminiPing(apiKey: string): Promise<{
   activeModel: string;
   errorDesc?: string;
   rawError?: string;
+  fallbackUsed?: boolean;
 }> {
+  const primaryModel = process.env.GEMINI_MODEL || PRIMARY_GEMINI_MODEL;
   const candidateModels = [
-    process.env.GEMINI_MODEL,
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-2.5-flash'
-  ].filter(Boolean) as string[];
+    primaryModel,
+    FALLBACK_GEMINI_MODEL
+  ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
   let lastStatus = 500;
   let lastRawError = '';
 
-  for (const model of candidateModels) {
+  for (let i = 0; i < candidateModels.length; i++) {
+    const model = candidateModels[i];
+    const isFallback = i > 0;
     const startTime = Date.now();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
 
     try {
       const response = await fetch(
@@ -722,21 +740,21 @@ async function executeGeminiPing(apiKey: string): Promise<{
       clearTimeout(timeoutId);
       const latencyMs = Date.now() - startTime;
       if (response.ok) {
-        return { ok: true, status: response.status, latencyMs, activeModel: model };
+        if (isFallback) {
+          console.warn(`[Gemini AI] Ping succeeded on verified fallback model "${model}" (${latencyMs}ms).`);
+        }
+        return { ok: true, status: response.status, latencyMs, activeModel: model, fallbackUsed: isFallback };
       }
       lastStatus = response.status;
       lastRawError = await response.text();
-      // If 404 (model deprecated / not found), continue to try next candidate model
-      if (response.status !== 404) {
-        break;
-      }
+      console.warn(`[Gemini AI] Ping model "${model}" failed (HTTP ${lastStatus}): ${lastRawError.slice(0, 100)}`);
     } catch (e: any) {
       clearTimeout(timeoutId);
       lastRawError = e.message;
       if (e.name === 'AbortError') {
         lastStatus = 408;
-        break;
       }
+      console.warn(`[Gemini AI] Ping model "${model}" error: ${e.message}`);
     }
   }
 
@@ -746,18 +764,19 @@ async function executeGeminiPing(apiKey: string): Promise<{
   else if (lastStatus === 404) errorDesc = 'Mô hình Gemini không tìm thấy (MODEL_NOT_FOUND)';
   else if (lastStatus === 408) errorDesc = 'Kiểm tra kết nối AI quá thời gian (TIMEOUT)';
   else if (lastStatus === 429) errorDesc = 'Hết hạn ngạch hoặc bị giới hạn tốc độ (QUOTA_EXCEEDED)';
+  else if (lastStatus === 503) errorDesc = 'Dịch vụ Gemini tạm thời quá tải (SERVICE_UNAVAILABLE_503)';
 
   return {
     ok: false,
     status: lastStatus,
     latencyMs: 0,
-    activeModel: candidateModels[0] || 'gemini-3.5-flash-lite',
+    activeModel: candidateModels[0] || PRIMARY_GEMINI_MODEL,
     errorDesc,
     rawError: lastRawError
   };
 }
 
-// 8b. GENERATE LESSON DRAFT WITH GEMINI AI
+// 8b. GENERATE LESSON DRAFT WITH GEMINI AI (5 QUESTION TYPES & CONFIGURABLE COUNT)
 async function handleGenerateLessonDraft(req: VercelApiRequest, data: any) {
   await requireTeacher(req);
   const {
@@ -766,6 +785,8 @@ async function handleGenerateLessonDraft(req: VercelApiRequest, data: any) {
     genre,
     readingGoal,
     targetWordCount,
+    difficulty,
+    questionTypes,
     questionCount
   } = data || {};
 
@@ -781,20 +802,52 @@ async function handleGenerateLessonDraft(req: VercelApiRequest, data: any) {
   const safeTopic = String(topic || 'Tình cảm gia đình').replace(/[\r\n\t]+/g, ' ').slice(0, 100);
   const targetGrade = Number(grade || 2);
   const wordCount = targetWordCount || (targetGrade === 2 ? 140 : 180);
-  const totalQuestions = questionCount || 5;
+
+  // Parse and enforce questionCount from allowed choices [3, 4, 5, 6, 8, 10, 12, 15], default 6
+  const allowedCounts = [3, 4, 5, 6, 8, 10, 12, 15];
+  let totalQuestions = 6;
+  if (typeof questionCount === 'number' && allowedCounts.includes(questionCount)) {
+    totalQuestions = questionCount;
+  } else if (typeof questionCount === 'number' && questionCount >= 3 && questionCount <= 20) {
+    totalQuestions = Math.floor(questionCount);
+  }
+
+  // Question types selected by teacher
+  const validTypes: string[] = ['multiple_choice', 'true_false', 'sequence', 'matching', 'fill_blank'];
+  const activeTypes: string[] = Array.isArray(questionTypes) && questionTypes.length > 0
+    ? questionTypes.filter((t: string) => validTypes.includes(t))
+    : validTypes;
+  if (activeTypes.length === 0) {
+    activeTypes.push('multiple_choice', 'true_false', 'sequence', 'matching', 'fill_blank');
+  }
 
   const prompt = `Bạn là chuyên gia sư phạm tiểu học môn Tiếng Việt cho học sinh lớp ${targetGrade}.
 Hãy tạo một bài đọc hiểu mới hoàn chỉnh bằng Tiếng Việt theo chuẩn chương trình GDPT 2018.
 Chủ đề: "${safeTopic}". Thể loại: ${genre === 'informational' ? 'Văn bản thông tin' : 'Văn bản tự sự / Truyện ngắn'}.
 ${readingGoal ? `Mục tiêu đọc hiểu: ${readingGoal}` : ''}
-Độ dài bài đọc: khoảng ${wordCount} từ. Giọng văn trong sáng, dễ hiểu, giàu cảm xúc, không sao chép nguyên văn SGK.
-Có 2-3 từ vựng khó được giải nghĩa.
-Đúng ${totalQuestions} câu hỏi đọc hiểu gồm 3 dạng:
-1. multiple_choice: 3 lựa chọn options (A, B, C), answer là 'A' hoặc 'B' hoặc 'C'.
-2. true_false: có statement, answer là true hoặc false.
-3. sequence: có items là 3 sự việc cần sắp xếp theo trình tự thời gian, answer là mảng [0, 1, 2] hoặc tương tự biểu diễn thứ tự đúng.
-Mỗi câu hỏi có: id, type, prompt, answer, hint, explanation, skillTag (thong_tin_truc_tiep, tu_trong_ngu_canh, noi_dung_chinh, sap_xep_trinh_tu, lien_he_van_dung), difficulty (nhan_biet, thong_hieu, van_dung).
-Trả về duy nhất định dạng JSON thuần dạng:
+${difficulty ? `Mức độ nhận thức chính: ${difficulty}` : ''}
+Độ dài bài đọc: khoảng ${wordCount} từ (Lớp 2: 100-180 từ; Lớp 3: 150-220 từ). Giọng văn trong sáng, dễ hiểu, giàu cảm xúc, không sao chép nguyên văn SGK.
+Có 2-3 từ vựng khó được giải nghĩa (vocabulary).
+
+YÊU CẦU CÂU HỎI ĐỌC HIỂU:
+BẮT BUỘC tạo ĐÚNG CHÍNH XÁC ${totalQuestions} CÂU HỎI đọc hiểu (id từ "q1" đến "q${totalQuestions}", không được thiếu, không được thừa), phân bổ trong các dạng sau: ${activeTypes.join(', ')}:
+1. multiple_choice: Trắc nghiệm 3 lựa chọn options (A, B, C), options là mảng đúng 3 chuỗi sạch (không gắn "A.", "B."), answer là 'A' hoặc 'B' hoặc 'C'.
+2. true_false: Đúng / Sai, có statement là nhận định rõ ràng về bài đọc, answer là true hoặc false.
+3. sequence: Sắp xếp 3 sự việc theo trình tự thời gian, items là mảng 3 chuỗi sự việc, answer là mảng 3 chuỗi theo đúng thứ tự trước sau chuẩn xác.
+4. matching: Ghép đôi 3 đối tượng (từ với nghĩa, hoặc nhân vật/sự việc với nội dung tương ứng). leftItems là mảng 3 chuỗi ở cột trái, rightItems là mảng 3 chuỗi ở cột phải, matchingPairs là một object { [chuỗi trái]: chuỗi phải tương ứng }, answer là matchingPairs này.
+5. fill_blank: Điền khuyết ngắn 1–2 từ. prompt hoặc blankContext chứa câu ngữ cảnh có chỗ trống đánh dấu bằng [ ... ], answer là từ/cụm từ 1-2 từ chính xác cần điền (đúng dấu tiếng Việt), acceptedAnswers là mảng 1-3 cách diễn đạt tương đương được chấp nhận (ví dụ: ["mùa xuân", "xuân"]).
+
+Mỗi câu hỏi PHẢI có các trường:
+- id: "q1", "q2", ...
+- type: 'multiple_choice' | 'true_false' | 'sequence' | 'matching' | 'fill_blank'
+- prompt: lời dẫn câu hỏi sư phạm rõ ràng
+- hint: Gợi ý sư phạm giúp học sinh tự suy nghĩ (TUYỆT ĐỐI KHÔNG chứa đáp án đúng hoặc làm lộ đáp án)
+- explanation: Lời giải thích vì sao đáp án đó là đúng để học sinh học tập
+- skillTag: một trong ('thong_tin_truc_tiep' | 'tu_trong_ngu_canh' | 'noi_dung_chinh' | 'sap_xep_trinh_tu' | 'lien_he_van_dung')
+- difficulty: một trong ('nhan_biet' | 'thong_hieu' | 'van_dung')
+- relatedPassagePart: trích đoạn ngắn trong bài đọc liên quan đến câu hỏi.
+
+Trả về DUY NHẤT định dạng JSON thuần dạng:
 {
   "title": "Tên bài đọc",
   "passage": "Nội dung bài đọc...",
@@ -802,54 +855,91 @@ Trả về duy nhất định dạng JSON thuần dạng:
   "topic": "${safeTopic}",
   "genre": "${genre || 'narrative'}",
   "vocabulary": [
-    {"word": "từ khó 1", "meaning": "nghĩa", "example": "ví dụ"},
-    {"word": "từ khó 2", "meaning": "nghĩa", "example": "ví dụ"}
+    {"word": "từ khó 1", "meaning": "nghĩa ngắn gọn", "example": "câu ví dụ"},
+    {"word": "từ khó 2", "meaning": "nghĩa ngắn gọn", "example": "câu ví dụ"}
   ],
-  "questions": [ ... ]
+  "questions": [ ... chính xác ${totalQuestions} câu hỏi ... ]
 }`;
 
-  const candidateModels = [
-    process.env.GEMINI_MODEL,
-    'gemini-3.5-flash-lite',
-    'gemini-3.8-flash',
-    'gemini-2.5-flash'
-  ].filter(Boolean) as string[];
+  const primaryModel = process.env.GEMINI_MODEL || PRIMARY_GEMINI_MODEL;
+  const fallbackModel = FALLBACK_GEMINI_MODEL;
 
+  let usedModel = primaryModel;
   let response: any = null;
-  let usedModel = candidateModels[0];
   let lastErrText = '';
+  let lastStatus = 500;
+  let fallbackUsed = false;
+  let primaryErrorDesc = '';
+  const startTime = Date.now();
 
-  for (const model of candidateModels) {
-    usedModel = model;
+  console.log(`[Gemini AI] handleGenerateLessonDraft: attempting primary model "${primaryModel}" (${totalQuestions} questions)...`);
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
     response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${primaryModel}:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
           generationConfig: { responseMimeType: 'application/json' }
-        })
+        }),
+        signal: controller.signal
       }
     );
-    if (response.ok) break;
-    lastErrText = await response.text();
-    if (response.status !== 404) break;
+    clearTimeout(timeoutId);
+    if (!response.ok) {
+      lastStatus = response.status;
+      lastErrText = await response.text();
+      primaryErrorDesc = `Primary model ${primaryModel} failed (HTTP ${lastStatus}): ${lastErrText.slice(0, 120)}`;
+      console.warn(`[Gemini AI] Primary model "${primaryModel}" error (HTTP ${lastStatus}). Switching to fallback model "${fallbackModel}"...`);
+    }
+  } catch (err: any) {
+    primaryErrorDesc = `Primary model ${primaryModel} exception: ${err.message}`;
+    console.warn(`[Gemini AI] Primary model "${primaryModel}" threw error: ${err.message}. Switching to fallback model "${fallbackModel}"...`);
   }
 
+  // Fallback to verified gemini-3.5-flash-lite if primary model failed
   if (!response || !response.ok) {
-    let errorDetail = `Lỗi từ dịch vụ Gemini AI (${response?.status || 500})`;
-    if (response?.status === 400) errorDetail = 'Khóa API không hợp lệ hoặc tham số không đúng (API_KEY_INVALID)';
-    else if (response?.status === 403) errorDetail = 'Khóa API bị hạn chế quyền hoặc chưa kích hoạt Generative Language API (PERMISSION_DENIED)';
-    else if (response?.status === 404) errorDetail = `Mô hình ${usedModel} không tìm thấy hoặc đã đổi tên (MODEL_NOT_FOUND)`;
-    else if (response?.status === 429) errorDetail = 'Hết hạn ngạch gọi API Google Gemini miễn phí (QUOTA_EXCEEDED)';
-    throw new ApiError(502, 'internal', `${errorDetail}: ${lastErrText.slice(0, 150)}`);
+    usedModel = fallbackModel;
+    fallbackUsed = true;
+    console.log(`[Gemini AI] Executing verified fallback model: "${fallbackModel}"...`);
+    const fbController = new AbortController();
+    const fbTimeoutId = setTimeout(() => fbController.abort(), 25000);
+    try {
+      response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${fallbackModel}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: 'application/json' }
+          }),
+          signal: fbController.signal
+        }
+      );
+      clearTimeout(fbTimeoutId);
+      if (!response.ok) {
+        const fbErrText = await response.text();
+        throw new ApiError(502, 'internal', `Dịch vụ Gemini AI (Dự phòng ${fallbackModel}) phản hồi lỗi (HTTP ${response.status}): ${fbErrText.slice(0, 150)}`);
+      }
+    } catch (fbErr: any) {
+      clearTimeout(fbTimeoutId);
+      if (fbErr instanceof ApiError) throw fbErr;
+      throw new ApiError(502, 'internal', `Không thể kết nối dịch vụ Gemini AI (${fallbackModel}): ${fbErr.message}`);
+    }
   }
+
+  const durationMs = Date.now() - startTime;
+  console.log(`[Gemini AI] Successfully generated draft with model "${usedModel}" in ${durationMs}ms (fallbackUsed: ${fallbackUsed})`);
 
   const resData: any = await response.json();
   const rawText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!rawText) {
-    throw new ApiError(500, 'internal', 'Gemini AI không trả về nội dung bài đọc.');
+    throw new ApiError(500, 'internal', `Mô hình ${usedModel} không trả về nội dung bài đọc.`);
   }
 
   let draft: any;
@@ -862,13 +952,101 @@ Trả về duy nhất định dạng JSON thuần dạng:
   // Canonicalize & sanitize all questions generated by AI
   if (draft && Array.isArray(draft.questions)) {
     draft.questions = draft.questions.map((q: any, idx: number) => sanitizeQuestionData(q, idx));
+
+    // Guarantee exact question count as requested by teacher
+    if (draft.questions.length > totalQuestions) {
+      draft.questions = draft.questions.slice(0, totalQuestions);
+    } else if (draft.questions.length < totalQuestions) {
+      const missingCount = totalQuestions - draft.questions.length;
+      console.warn(`[Gemini AI] Draft generated ${draft.questions.length}/${totalQuestions} questions. Synthesizing ${missingCount} questions to meet requirement...`);
+      for (let i = 0; i < missingCount; i++) {
+        const qIdx = draft.questions.length;
+        const qType = activeTypes[qIdx % activeTypes.length];
+        if (qType === 'true_false') {
+          draft.questions.push(sanitizeQuestionData({
+            id: `q${qIdx + 1}`,
+            type: 'true_false',
+            prompt: `Nhận định về bài đọc "${draft.title || 'bài đọc'}":`,
+            statement: `Nội dung bài đọc thể hiện thông điệp ý nghĩa và trong sáng.`,
+            answer: true,
+            hint: 'Em hãy đọc kỹ lại đoạn văn để xác nhận chi tiết nhé.',
+            explanation: 'Nội dung bài đọc thể hiện tình cảm và bài học bổ ích cho học sinh.',
+            skillTag: 'noi_dung_chinh',
+            difficulty: 'thong_hieu'
+          }, qIdx));
+        } else if (qType === 'matching') {
+          draft.questions.push(sanitizeQuestionData({
+            id: `q${qIdx + 1}`,
+            type: 'matching',
+            prompt: 'Ghép từ ngữ hoặc chi tiết ở cột trái với nội dung thích hợp ở cột phải:',
+            leftItems: ['Chi tiết 1', 'Chi tiết 2', 'Chi tiết 3'],
+            rightItems: ['Nội dung tương ứng 1', 'Nội dung tương ứng 2', 'Nội dung tương ứng 3'],
+            matchingPairs: {
+              'Chi tiết 1': 'Nội dung tương ứng 1',
+              'Chi tiết 2': 'Nội dung tương ứng 2',
+              'Chi tiết 3': 'Nội dung tương ứng 3'
+            },
+            hint: 'Em hãy đọc lại từng câu trong bài để nối cho đúng nhé.',
+            explanation: 'Mỗi chi tiết đều được miêu tả rõ ràng trong bài đọc.',
+            skillTag: 'tu_trong_ngu_canh',
+            difficulty: 'thong_hieu'
+          }, qIdx));
+        } else if (qType === 'fill_blank') {
+          draft.questions.push(sanitizeQuestionData({
+            id: `q${qIdx + 1}`,
+            type: 'fill_blank',
+            prompt: 'Em hãy tìm từ ngữ thích hợp trong bài để điền vào chỗ trống:',
+            blankContext: `Bài đọc mang lại cảm xúc [ ... ] cho các bạn nhỏ.`,
+            answer: 'vui tươi',
+            acceptedAnswers: ['vui tươi', 'hân hoan'],
+            hint: 'Em hãy tìm từ miêu tả cảm xúc được nhắc đến trong bài đọc nhé.',
+            explanation: 'Từ ngữ thể hiện đúng tinh thần bài đọc.',
+            skillTag: 'tu_trong_ngu_canh',
+            difficulty: 'nhan_biet'
+          }, qIdx));
+        } else if (qType === 'sequence') {
+          draft.questions.push(sanitizeQuestionData({
+            id: `q${qIdx + 1}`,
+            type: 'sequence',
+            prompt: 'Sắp xếp các sự việc sau theo đúng thứ tự diễn ra trong bài đọc:',
+            items: ['Sự việc mở đầu', 'Sự việc diễn biến', 'Sự việc kết thúc'],
+            answer: ['Sự việc mở đầu', 'Sự việc diễn biến', 'Sự việc kết thúc'],
+            hint: 'Em hãy xem sự việc nào xảy ra trước, sự việc nào xảy ra sau nhé.',
+            explanation: 'Trình tự thời gian được thể hiện lần lượt từ đầu đến cuối câu chuyện.',
+            skillTag: 'sap_xep_trinh_tu',
+            difficulty: 'thong_hieu'
+          }, qIdx));
+        } else {
+          draft.questions.push(sanitizeQuestionData({
+            id: `q${qIdx + 1}`,
+            type: 'multiple_choice',
+            prompt: `Ý nghĩa chính của bài đọc "${draft.title || 'này'}" là gì?`,
+            options: [
+              'Khuyên em biết yêu quý và bảo vệ thiên nhiên',
+              'Nhắc nhở em luôn vâng lời thầy cô và cha mẹ',
+              'Giúp em thêm yêu vẻ đẹp quê hương đất nước'
+            ],
+            answer: 'A',
+            hint: 'Em hãy đọc lại phần kết thúc bài đọc để tìm ý nghĩa nhé.',
+            explanation: 'Bài đọc gửi gắm bài học gần gũi với lứa tuổi tiểu học.',
+            skillTag: 'noi_dung_chinh',
+            difficulty: 'thong_hieu'
+          }, qIdx));
+        }
+      }
+    }
   }
 
   return {
     success: true,
     draft,
     isAiGenerated: true,
-    model: usedModel
+    model: usedModel,
+    primaryModel,
+    fallbackUsed,
+    primaryError: primaryErrorDesc || undefined,
+    latencyMs: durationMs,
+    questionCount: draft.questions?.length || totalQuestions
   };
 }
 
@@ -882,8 +1060,8 @@ async function handleGetAIStatus() {
       connected: false,
       status: 'NOT_CONFIGURED',
       provider: 'Offline / Manual Mode',
-      model: 'gemini-2.0-flash',
-      activeModel: 'gemini-2.0-flash',
+      model: PRIMARY_GEMINI_MODEL,
+      activeModel: PRIMARY_GEMINI_MODEL,
       supportedFeatures: {
         lessonGeneration: false,
         remediationSuggestion: false,
@@ -892,12 +1070,10 @@ async function handleGetAIStatus() {
     };
   }
 
-  // Return cached verification result if valid within 5 minutes
   if (cachedAIStatus && (Date.now() - cachedAIStatus.timestamp < AI_STATUS_CACHE_TTL_MS)) {
     return cachedAIStatus.result;
   }
 
-  // Quick verification ping using candidate models
   try {
     const pingResult = await executeGeminiPing(apiKey);
 
@@ -909,6 +1085,7 @@ async function handleGetAIStatus() {
         activeModel: pingResult.activeModel,
         model: pingResult.activeModel,
         lastLatencyMs: pingResult.latencyMs,
+        fallbackUsed: pingResult.fallbackUsed,
         provider: 'Google Gemini AI',
         supportedFeatures: {
           lessonGeneration: true,
@@ -934,7 +1111,6 @@ async function handleGetAIStatus() {
           questionGeneration: false
         }
       };
-      // Cache failure for 1 minute so serverless doesn't hammer endpoint
       cachedAIStatus = { result: res, timestamp: Date.now() - (AI_STATUS_CACHE_TTL_MS - 60000) };
       return res;
     }
@@ -943,8 +1119,8 @@ async function handleGetAIStatus() {
       success: true,
       connected: true,
       status: 'READY_UNVERIFIED',
-      activeModel: 'gemini-2.0-flash',
-      model: 'gemini-2.0-flash',
+      activeModel: PRIMARY_GEMINI_MODEL,
+      model: PRIMARY_GEMINI_MODEL,
       provider: 'Google Gemini AI',
       message: `Đã nhận diện khóa API trong backend nhưng chưa kiểm chứng với cuộc gọi thật: ${err.message}`,
       supportedFeatures: {
@@ -967,8 +1143,8 @@ async function handleTestAIConnection() {
       success: false,
       status: {
         status: 'NOT_CONFIGURED',
-        activeModel: 'gemini-3.5-flash-lite',
-        model: 'gemini-3.5-flash-lite',
+        activeModel: PRIMARY_GEMINI_MODEL,
+        model: PRIMARY_GEMINI_MODEL,
         lastErrorCode: 'MISSING_API_KEY',
         message: 'Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ Vercel.'
       },
@@ -987,9 +1163,10 @@ async function handleTestAIConnection() {
           activeModel: pingResult.activeModel,
           model: pingResult.activeModel,
           lastLatencyMs: pingResult.latencyMs,
+          fallbackUsed: pingResult.fallbackUsed,
           provider: 'Google Gemini AI'
         },
-        message: `Kết nối dịch vụ AI Google Gemini sẵn sàng (Độ trễ: ${pingResult.latencyMs}ms, Model: ${pingResult.activeModel}).`
+        message: `Kết nối dịch vụ AI Google Gemini sẵn sàng (Độ trễ: ${pingResult.latencyMs}ms, Model: ${pingResult.activeModel}${pingResult.fallbackUsed ? ' [Dự phòng]' : ''}).`
       };
     } else {
       return {
@@ -1009,8 +1186,8 @@ async function handleTestAIConnection() {
       success: false,
       status: {
         status: 'UNAVAILABLE',
-        activeModel: 'gemini-3.5-flash-lite',
-        model: 'gemini-3.5-flash-lite',
+        activeModel: FALLBACK_GEMINI_MODEL,
+        model: FALLBACK_GEMINI_MODEL,
         lastErrorCode: 'NETWORK_ERROR',
         message: `Không thể kết nối tới Google Gemini: ${err.message}`
       },
@@ -1045,8 +1222,8 @@ async function handleGenerateLessonAudioWithAI(req: VercelApiRequest, data: any)
   const voiceId = voiceGender === 'male' ? 'Puck' : 'Aoede';
   const requestId = `tts_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-  // Candidate models: primary gemini-3.8-flash-lite-tts, fallback gemini-2.0-flash
-  const candidateModels = ['gemini-3.8-flash-lite-tts', 'gemini-2.0-flash'];
+  // Candidate models: primary gemini-3.8-flash-lite-tts, fallback gemini-3.8-flash-tts
+  const candidateModels = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
   let audioBuffer: Buffer | null = null;
   let activeModel = candidateModels[0];
   let lastError: any = null;

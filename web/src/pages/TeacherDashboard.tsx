@@ -277,6 +277,24 @@ export const TeacherDashboard: React.FC = () => {
   const [aiAutoGenerateAudio, setAiAutoGenerateAudio] = useState(false);
   const [autoTriggerAudio, setAutoTriggerAudio] = useState(false);
 
+  // AI Question Customization (Nhiệm vụ B & C: 5 dạng câu hỏi, chọn số lượng 3-15 câu)
+  const [aiQuestionCount, setAiQuestionCount] = useState<number>(6);
+  const [aiDifficulty, setAiDifficulty] = useState<'nhan_biet' | 'thong_hieu' | 'van_dung' | 'mixed'>('mixed');
+  const [aiSelectedSkill, setAiSelectedSkill] = useState<string>('all');
+  const [aiQuestionTypes, setAiQuestionTypes] = useState<string[]>([
+    'multiple_choice',
+    'true_false',
+    'sequence',
+    'matching',
+    'fill_blank'
+  ]);
+  const [aiGenerationInfo, setAiGenerationInfo] = useState<{
+    model?: string;
+    latencyMs?: number;
+    questionCount?: number;
+    usedFallback?: boolean;
+  } | null>(null);
+
   // Audio Upload & Survey States (Gói C V5.5 & V5.5.1)
   const [uploadingAudio, setUploadingAudio] = useState(false);
   const [audioUploadMsg, setAudioUploadMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -1184,11 +1202,26 @@ export const TeacherDashboard: React.FC = () => {
         topic: aiTopic,
         genre: aiGenre,
         targetWordCount: aiWordCount,
-        readingGoal: aiGoal
+        readingGoal: aiGoal,
+        questionCount: aiQuestionCount,
+        difficulty: aiDifficulty,
+        skillTag: aiSelectedSkill === 'all' ? undefined : aiSelectedSkill,
+        questionTypes: aiQuestionTypes
       });
 
       if (res.data?.success) {
         const rawDraft = res.data.draft;
+        const count = rawDraft.questions?.length || 0;
+        const usedModel = res.data.model || 'gemini-3.8-flash';
+        const latency = res.data.latencyMs || 0;
+
+        setAiGenerationInfo({
+          model: usedModel,
+          latencyMs: latency,
+          questionCount: count,
+          usedFallback: res.data.usedFallback || usedModel.includes('flash-lite')
+        });
+
         setDraftLesson({
           ...rawDraft,
           grade: (rawDraft.grade || aiGrade) as Grade,
@@ -1209,12 +1242,13 @@ export const TeacherDashboard: React.FC = () => {
         setActionMessage({
           type: 'success',
           text: aiAutoGenerateAudio
-            ? 'AI đã tạo thành công bản nháp bài đọc và đang tự động tạo giọng đọc tiếng Việt...'
-            : 'AI đã tạo thành công bản nháp bài đọc! Giáo viên vui lòng duyệt giọng đọc AI, nội dung và câu hỏi trước khi xuất bản.'
+            ? `AI (${usedModel}, ${latency}ms) đã tạo thành công bài đọc và ${count} câu hỏi, đang tự động tạo giọng đọc...`
+            : `AI (${usedModel}, ${latency}ms) đã tạo thành công bài đọc và ${count} câu hỏi! Giáo viên vui lòng duyệt nội dung và câu hỏi trước khi xuất bản.`
         });
       }
     } catch (err: any) {
       console.warn('AI Error:', err);
+      setAiGenerationInfo(null);
       setActionMessage({
         type: 'error',
         text: err.message || 'Chưa thể kết nối AI. Vui lòng chuyển sang Soạn thủ công hoặc cấu hình GEMINI_API_KEY.'
@@ -1297,7 +1331,9 @@ export const TeacherDashboard: React.FC = () => {
         return {
           answer: direct.correctAnswer !== undefined ? direct.correctAnswer : direct.answer,
           hint: direct.hint || '',
-          explanation: direct.explanation || ''
+          explanation: direct.explanation || '',
+          matchingPairs: direct.matchingPairs || (typeof direct.answer === 'object' && !Array.isArray(direct.answer) ? direct.answer : undefined),
+          acceptedAnswers: direct.acceptedAnswers || []
         };
       }
     }
@@ -1307,7 +1343,9 @@ export const TeacherDashboard: React.FC = () => {
         return {
           answer: found.correctAnswer !== undefined ? found.correctAnswer : found.answer,
           hint: found.hint || '',
-          explanation: found.explanation || ''
+          explanation: found.explanation || '',
+          matchingPairs: found.matchingPairs || (typeof found.answer === 'object' && !Array.isArray(found.answer) ? found.answer : undefined),
+          acceptedAnswers: found.acceptedAnswers || []
         };
       }
     }
@@ -1346,7 +1384,19 @@ export const TeacherDashboard: React.FC = () => {
               options: pq.options,
               items: pq.items,
               statement: pq.statement,
-              answer: privateInfo?.answer !== undefined ? privateInfo.answer : (pq.options ? 'A' : (pq.type === 'true_false' ? true : (pq.items || []))),
+              leftItems: pq.leftItems,
+              rightItems: pq.rightItems,
+              matchingPairs: privateInfo?.matchingPairs || (typeof privateInfo?.answer === 'object' && !Array.isArray(privateInfo?.answer) ? privateInfo?.answer : undefined),
+              blankContext: pq.blankContext,
+              blankPosition: pq.blankPosition,
+              acceptedAnswers: privateInfo?.acceptedAnswers || [],
+              answer: privateInfo?.answer !== undefined
+                ? privateInfo.answer
+                : (pq.type === 'matching'
+                    ? (privateInfo?.matchingPairs || {})
+                    : pq.type === 'fill_blank'
+                    ? (privateInfo?.acceptedAnswers?.[0] || '')
+                    : pq.options ? 'A' : (pq.type === 'true_false' ? true : (pq.items || []))),
               hint: privateInfo?.hint || pq.hint || '',
               explanation: privateInfo?.explanation || '',
               skillTag: pq.skillTag || 'thong_tin_truc_tiep',
@@ -1697,8 +1747,8 @@ export const TeacherDashboard: React.FC = () => {
     }
   };
 
-  // Question CRUD Handlers (P0)
-  const handleAddQuestion = (type: 'multiple_choice' | 'true_false' | 'sequence') => {
+  // Question CRUD Handlers (P0 & Nhiệm vụ B)
+  const handleAddQuestion = (type: 'multiple_choice' | 'true_false' | 'sequence' | 'matching' | 'fill_blank' | string) => {
     if (!draftLesson) return;
     if (draftLesson.questions.length >= 20) {
       alert('Mỗi bài đọc hỗ trợ tối đa 20 câu hỏi.');
@@ -1730,6 +1780,41 @@ export const TeacherDashboard: React.FC = () => {
         explanation: 'Giải thích lý do nhận định này là đúng.',
         skillTag: 'noi_dung_chinh',
         difficulty: 'thong_hieu'
+      };
+    } else if (type === 'matching') {
+      newQ = {
+        id: newId,
+        type: 'matching',
+        prompt: 'Em hãy ghép từ ở Cột A với lời giải nghĩa phù hợp ở Cột B:',
+        leftItems: ['Từ ngữ 1', 'Từ ngữ 2', 'Từ ngữ 3'],
+        rightItems: ['Giải nghĩa 1', 'Giải nghĩa 2', 'Giải nghĩa 3'],
+        matchingPairs: {
+          'Từ ngữ 1': 'Giải nghĩa 1',
+          'Từ ngữ 2': 'Giải nghĩa 2',
+          'Từ ngữ 3': 'Giải nghĩa 3'
+        },
+        answer: {
+          'Từ ngữ 1': 'Giải nghĩa 1',
+          'Từ ngữ 2': 'Giải nghĩa 2',
+          'Từ ngữ 3': 'Giải nghĩa 3'
+        },
+        hint: 'Em hãy đọc kỹ các câu văn có chứa những từ này trong bài nhé.',
+        explanation: 'Các cặp ghép nối chính xác theo nội dung bài đọc.',
+        skillTag: 'tu_trong_ngu_canh',
+        difficulty: 'thong_hieu'
+      };
+    } else if (type === 'fill_blank') {
+      newQ = {
+        id: newId,
+        type: 'fill_blank',
+        prompt: 'Điền 1 từ thích hợp vào chỗ trống trong câu sau:',
+        blankContext: 'Mùa xuân đến, cây bàng đâm chồi [ ... ] non mơn mởn.',
+        answer: 'nảy lộc',
+        acceptedAnswers: ['nảy lộc', 'nảy chồi'],
+        hint: 'Đọc kỹ câu văn miêu tả cây bàng vào mùa xuân trong bài đọc.',
+        explanation: 'Từ thích hợp cần điền vào chỗ trống là "nảy lộc".',
+        skillTag: 'thong_tin_truc_tiep',
+        difficulty: 'nhan_biet'
       };
     } else {
       newQ = {
@@ -6671,6 +6756,106 @@ export const TeacherDashboard: React.FC = () => {
                   />
                 </div>
 
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Kỹ năng đọc hiểu trọng tâm</label>
+                  <select
+                    value={aiSelectedSkill}
+                    onChange={(e) => setAiSelectedSkill(e.target.value)}
+                    className="w-full p-3 bg-slate-50 border rounded-xl text-sm font-semibold focus:bg-white"
+                  >
+                    <option value="all">Tất cả kỹ năng (Phối hợp chuẩn GDPT 2018)</option>
+                    <option value="thong_tin_truc_tiep">1. Tìm thông tin trực tiếp</option>
+                    <option value="tu_trong_ngu_canh">2. Hiểu từ ngữ trong ngữ cảnh</option>
+                    <option value="noi_dung_chinh">3. Nắm bắt nội dung chính</option>
+                    <option value="sap_xep_trinh_tu">4. Sắp xếp trình tự sự việc</option>
+                    <option value="lien_he_van_dung">5. Liên hệ & Vận dụng đời sống</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Mức độ nhận thức</label>
+                  <select
+                    value={aiDifficulty}
+                    onChange={(e) => setAiDifficulty(e.target.value as any)}
+                    className="w-full p-3 bg-slate-50 border rounded-xl text-sm font-semibold focus:bg-white"
+                  >
+                    <option value="mixed">Phối hợp cân bằng các mức độ (Mặc định)</option>
+                    <option value="nhan_biet">Mức 1: Nhận biết (Nhớ & tìm chi tiết trong bài)</option>
+                    <option value="thong_hieu">Mức 2: Thông hiểu (Giải nghĩa & tóm tắt ý)</option>
+                    <option value="van_dung">Mức 3: Vận dụng (Liên hệ thực tế đời sống)</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                    <span>Dạng câu hỏi tạo bài (5 dạng chuẩn GDPT)</span>
+                    <span className="text-[11px] text-slate-500 font-normal">Đã chọn: {aiQuestionTypes.length}/5 dạng</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 p-3 bg-slate-50 rounded-2xl border border-slate-200">
+                    {[
+                      { id: 'multiple_choice', label: '1. Trắc nghiệm A/B/C', color: 'text-sky-700' },
+                      { id: 'true_false', label: '2. Đúng / Sai', color: 'text-emerald-700' },
+                      { id: 'sequence', label: '3. Sắp xếp sự việc', color: 'text-amber-700' },
+                      { id: 'matching', label: '4. Ghép đôi kéo thả (Mới)', color: 'text-purple-700' },
+                      { id: 'fill_blank', label: '5. Điền khuyết ngắn (Mới)', color: 'text-rose-700' }
+                    ].map((type) => {
+                      const isChecked = aiQuestionTypes.includes(type.id);
+                      return (
+                        <label
+                          key={type.id}
+                          className={`flex items-center gap-2.5 p-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                            isChecked ? 'bg-white shadow-sm border border-slate-200 ' + type.color : 'text-slate-400 hover:text-slate-600'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setAiQuestionTypes([...aiQuestionTypes, type.id]);
+                              } else {
+                                if (aiQuestionTypes.length > 1) {
+                                  setAiQuestionTypes(aiQuestionTypes.filter((t) => t !== type.id));
+                                }
+                              }
+                            }}
+                            className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 cursor-pointer"
+                          />
+                          <span>{type.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                    <span>Số lượng câu hỏi cần tạo</span>
+                    <span className="text-[11px] text-sky-700 font-black">
+                      Hiện tại: {aiQuestionCount} câu {aiQuestionCount === 6 && '(Mặc định)'}
+                    </span>
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {[3, 4, 5, 6, 8, 10, 12, 15].map((cnt) => {
+                      const isSelected = aiQuestionCount === cnt;
+                      return (
+                        <button
+                          key={cnt}
+                          type="button"
+                          onClick={() => setAiQuestionCount(cnt)}
+                          className={`px-3.5 py-2 rounded-xl text-xs font-black transition cursor-pointer ${
+                            isSelected
+                              ? 'bg-sky-600 text-white shadow-md shadow-sky-500/20 ring-2 ring-sky-300'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                          }`}
+                        >
+                          {cnt} câu {cnt === 6 && '⭐'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <div className="md:col-span-2 p-3.5 bg-indigo-50/90 border border-indigo-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
                   <label className="flex items-center gap-3 cursor-pointer select-none">
                     <input
@@ -6690,15 +6875,32 @@ export const TeacherDashboard: React.FC = () => {
                 </div>
               </div>
 
-              <button
-                type="button"
-                disabled={generatingAI}
-                onClick={handleGenerateAI}
-                className="px-6 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black text-sm rounded-2xl shadow-md transition active:scale-95 disabled:opacity-50 flex items-center gap-2"
-              >
-                <Sparkles className="w-5 h-5 text-amber-300" />
-                <span>{generatingAI ? 'AI đang biên soạn bài...' : 'Tạo bản nháp với AI'}</span>
-              </button>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                <button
+                  type="button"
+                  disabled={generatingAI}
+                  onClick={handleGenerateAI}
+                  className="px-6 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black text-sm rounded-2xl shadow-md transition active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                >
+                  <Sparkles className="w-5 h-5 text-amber-300" />
+                  <span>{generatingAI ? 'AI đang biên soạn bài...' : `Tạo bản nháp (${aiQuestionCount} câu) với AI`}</span>
+                </button>
+
+                {aiGenerationInfo && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex flex-wrap items-center gap-3 text-xs">
+                    <span className="font-bold text-emerald-950 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                      Mô hình: <code className="bg-emerald-100 px-1.5 py-0.5 rounded text-emerald-800 font-mono text-[11px]">{aiGenerationInfo.model}</code>
+                      {aiGenerationInfo.usedFallback && (
+                        <span className="text-[10px] text-amber-800 font-bold bg-amber-100 px-1 rounded">(Dự phòng)</span>
+                      )}
+                    </span>
+                    <span className="text-emerald-800 text-[11px]">
+                      Độ trễ: <strong>{aiGenerationInfo.latencyMs}ms</strong> • Đã tạo: <strong>{aiGenerationInfo.questionCount} câu</strong>
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -6872,7 +7074,7 @@ export const TeacherDashboard: React.FC = () => {
                     Quản lý câu hỏi ({draftLesson.questions.length}/20 câu):
                   </span>
                   <span className="text-[11px] text-slate-500 font-medium">
-                    (Hỗ trợ 1–20 câu, 3 dạng: Trắc nghiệm, Đúng/Sai, Sắp xếp)
+                    (Hỗ trợ 1–20 câu, 5 dạng: Trắc nghiệm, Đúng/Sai, Sắp xếp, Ghép đôi, Điền khuyết)
                   </span>
                 </div>
 
@@ -6889,7 +7091,7 @@ export const TeacherDashboard: React.FC = () => {
                     </button>
 
                     {showAddQuestionMenu && (
-                      <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-20 animate-fade-in">
+                      <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-20 animate-fade-in">
                         <button
                           type="button"
                           onClick={() => handleAddQuestion('multiple_choice')}
@@ -6913,6 +7115,22 @@ export const TeacherDashboard: React.FC = () => {
                         >
                           <span className="w-2 h-2 rounded-full bg-amber-500" />
                           <span>3. Sắp xếp 3 sự việc</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAddQuestion('matching')}
+                          className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-800 hover:bg-emerald-50 hover:text-emerald-900 flex items-center gap-2 cursor-pointer"
+                        >
+                          <span className="w-2 h-2 rounded-full bg-purple-500" />
+                          <span>4. Ghép đôi kéo thả (Từ - Nghĩa)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAddQuestion('fill_blank')}
+                          className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-800 hover:bg-emerald-50 hover:text-emerald-900 flex items-center gap-2 cursor-pointer"
+                        >
+                          <span className="w-2 h-2 rounded-full bg-rose-500" />
+                          <span>5. Điền khuyết ngắn (1–2 từ)</span>
                         </button>
                       </div>
                     )}
@@ -7384,6 +7602,153 @@ export const TeacherDashboard: React.FC = () => {
                           </div>
                         )}
 
+                        {/* Matching pairs editor (Nhiệm vụ B) */}
+                        {q.type === 'matching' && (() => {
+                          const leftList: string[] = (q.leftItems && q.leftItems.length > 0)
+                            ? q.leftItems
+                            : ['Từ ngữ 1', 'Từ ngữ 2', 'Từ ngữ 3'];
+                          const rightList: string[] = (q.rightItems && q.rightItems.length > 0)
+                            ? q.rightItems
+                            : ['Giải nghĩa 1', 'Giải nghĩa 2', 'Giải nghĩa 3'];
+                          const currentPairs: Record<string, string> = (
+                            q.matchingPairs || (typeof q.answer === 'object' && !Array.isArray(q.answer) ? q.answer : {})
+                          );
+
+                          const updatePair = (pIdx: number, side: 'left' | 'right', val: string) => {
+                            const newLeft = [...leftList];
+                            const newRight = [...rightList];
+                            if (side === 'left') {
+                              newLeft[pIdx] = val;
+                            } else {
+                              newRight[pIdx] = val;
+                            }
+                            const newPairs: Record<string, string> = {};
+                            newLeft.forEach((l, i) => {
+                              newPairs[l] = newRight[i];
+                            });
+                            const updatedQuestions = [...draftLesson.questions];
+                            updatedQuestions[idx] = {
+                              ...q,
+                              leftItems: newLeft,
+                              rightItems: newRight,
+                              matchingPairs: newPairs,
+                              answer: newPairs
+                            };
+                            setDraftLesson({ ...draftLesson, questions: updatedQuestions });
+                          };
+
+                          return (
+                            <div className="space-y-3 pt-1">
+                              <div className="flex items-center justify-between">
+                                <label className="block text-xs font-bold text-slate-700">
+                                  Các cặp ghép tương ứng (Cột A ghép với Cột B):
+                                </label>
+                                <span className="text-[11px] text-purple-700 font-semibold">
+                                  Học sinh sẽ nhận Cột B xáo trộn ngẫu nhiên
+                                </span>
+                              </div>
+                              <div className="space-y-2">
+                                {leftList.map((leftVal, pIdx) => {
+                                  const rightVal = currentPairs[leftVal] || rightList[pIdx] || '';
+                                  return (
+                                    <div key={pIdx} className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2.5 bg-purple-50/50 rounded-xl border border-purple-200">
+                                      <div>
+                                        <span className="block text-[11px] font-bold text-purple-900 mb-1">
+                                          Cột A ({pIdx + 1}):
+                                        </span>
+                                        <input
+                                          type="text"
+                                          value={leftVal}
+                                          onChange={(e) => updatePair(pIdx, 'left', e.target.value)}
+                                          placeholder="Từ ngữ / Sự việc"
+                                          className="w-full px-3 py-1.5 bg-white rounded-lg border border-purple-300 text-xs font-medium focus:outline-none"
+                                        />
+                                      </div>
+                                      <div>
+                                        <span className="block text-[11px] font-bold text-purple-900 mb-1">
+                                          Cột B (Nghĩa / Nội dung khớp):
+                                        </span>
+                                        <input
+                                          type="text"
+                                          value={rightVal}
+                                          onChange={(e) => updatePair(pIdx, 'right', e.target.value)}
+                                          placeholder="Giải nghĩa / Nội dung tương ứng"
+                                          className="w-full px-3 py-1.5 bg-white rounded-lg border border-purple-300 text-xs font-medium focus:outline-none"
+                                        />
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Fill Blank short text editor (Nhiệm vụ B) */}
+                        {q.type === 'fill_blank' && (
+                          <div className="space-y-3 pt-1">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                Ngữ cảnh câu có chỗ trống (Ký hiệu <code>[ ... ]</code> đại diện cho vị trí điền):
+                              </label>
+                              <input
+                                type="text"
+                                value={q.blankContext || q.prompt}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  const updatedQuestions = [...draftLesson.questions];
+                                  updatedQuestions[idx] = { ...q, blankContext: val };
+                                  setDraftLesson({ ...draftLesson, questions: updatedQuestions });
+                                }}
+                                placeholder="VD: Mùa xuân đến, cây bàng đâm chồi [ ... ] non mơn mởn."
+                                className="w-full px-3 py-1.5 bg-rose-50/50 rounded-lg border border-rose-300 text-xs font-medium focus:bg-white focus:outline-none"
+                              />
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs font-bold text-emerald-800 mb-1">
+                                  Đáp án chuẩn (1–2 từ):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={typeof q.answer === 'string' ? q.answer : (q.acceptedAnswers?.[0] || '')}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    const updatedQuestions = [...draftLesson.questions];
+                                    const currentAcc = q.acceptedAnswers || [];
+                                    const newAcc = currentAcc.includes(val) ? currentAcc : [val, ...currentAcc.filter((a: string) => a !== val)];
+                                    updatedQuestions[idx] = {
+                                      ...q,
+                                      answer: val,
+                                      acceptedAnswers: newAcc
+                                    };
+                                    setDraftLesson({ ...draftLesson, questions: updatedQuestions });
+                                  }}
+                                  placeholder="VD: nảy lộc"
+                                  className="w-full px-3 py-1.5 bg-emerald-50/50 rounded-lg border border-emerald-300 text-xs font-bold text-emerald-950 focus:bg-white focus:outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-bold text-slate-700 mb-1">
+                                  Các cách viết tương đương (cách nhau bởi dấu phẩy):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={(q.acceptedAnswers || [q.answer]).filter(Boolean).join(', ')}
+                                  onChange={(e) => {
+                                    const list = e.target.value.split(',').map((s) => s.trim()).filter(Boolean);
+                                    const updatedQuestions = [...draftLesson.questions];
+                                    updatedQuestions[idx] = { ...q, acceptedAnswers: list };
+                                    setDraftLesson({ ...draftLesson, questions: updatedQuestions });
+                                  }}
+                                  placeholder="VD: nảy lộc, nảy chồi, đâm chồi"
+                                  className="w-full px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-300 text-xs focus:bg-white focus:outline-none"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                           <div>
                             <label className="block text-[11px] font-bold text-amber-700 mb-1">Gợi ý sư phạm (không lộ đáp án):</label>
@@ -7481,9 +7846,27 @@ export const TeacherDashboard: React.FC = () => {
                             ))}
                           </div>
                         )}
+                        {q.type === 'matching' && (
+                          <div className="my-2 p-2.5 bg-purple-50/60 rounded-xl border border-purple-200 text-xs">
+                            <span className="font-bold text-purple-900 block mb-1">Cặp ghép nối:</span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                              {(q.leftItems || []).map((left: string, lIdx: number) => (
+                                <div key={lIdx} className="bg-white p-2 rounded border border-purple-200 text-slate-700">
+                                  <strong className="text-purple-700">{left}</strong> ➔ <span>{q.matchingPairs?.[left] || q.rightItems?.[lIdx] || ''}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {q.type === 'fill_blank' && (
+                          <div className="my-2 p-2.5 bg-rose-50/60 rounded-xl border border-rose-200 text-xs text-slate-800">
+                            <div className="mb-1"><strong>Ngữ cảnh:</strong> <em>{q.blankContext || q.prompt}</em></div>
+                            <div><strong>Đáp án:</strong> <code className="bg-white px-1.5 py-0.5 rounded border border-rose-300 font-bold text-rose-800">{q.answer}</code> {q.acceptedAnswers && q.acceptedAnswers.length > 1 && <span className="text-slate-500">(Chấp nhận: {q.acceptedAnswers.join(', ')})</span>}</div>
+                          </div>
+                        )}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600 mt-2 pt-2 border-t border-slate-200">
                           <div>
-                            <strong className="text-emerald-700">Đáp án đúng (máy chủ):</strong> {JSON.stringify(q.answer)}
+                            <strong className="text-emerald-700">Đáp án đúng (máy chủ):</strong> {typeof q.answer === 'object' ? JSON.stringify(q.answer) : String(q.answer)}
                           </div>
                           <div>
                             <strong className="text-amber-700">Gợi ý sư phạm:</strong> {q.hint}
@@ -11311,6 +11694,141 @@ export const TeacherDashboard: React.FC = () => {
                                     Kiểm tra thứ tự
                                   </button>
                                 </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* 4. Matching interactive preview (Nhiệm vụ B) */}
+                          {currQ.type === 'matching' && (() => {
+                            const leftList: string[] = (currQ.leftItems && currQ.leftItems.length > 0)
+                              ? currQ.leftItems
+                              : ['Từ ngữ 1', 'Từ ngữ 2', 'Từ ngữ 3'];
+                            const rightList: string[] = (currQ.rightItems && currQ.rightItems.length > 0)
+                              ? currQ.rightItems
+                              : ['Giải nghĩa 1', 'Giải nghĩa 2', 'Giải nghĩa 3'];
+                            const userPairs: Record<string, string> = previewUserAnswers[currQ.id] || {};
+                            const isCorrect = checkAnswerCorrectness(userPairs, targetCorrect, {
+                              type: 'matching',
+                              matchingPairs: currQ.matchingPairs || targetCorrect
+                            });
+                            const hasChecked = Boolean(previewUserAnswers[currQ.id]);
+
+                            return (
+                              <div className="space-y-3 pt-1">
+                                <div className="flex items-center justify-between pb-1">
+                                  <span className="text-xs font-bold text-purple-900 block">
+                                    Mô phỏng ghép đôi: Chọn ô ở Cột A rồi chọn ô ở Cột B tương ứng:
+                                  </span>
+                                  {hasChecked && (
+                                    <span className={`text-xs font-black px-2.5 py-0.5 rounded-full ${
+                                      isCorrect ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                                    }`}>
+                                      {isCorrect ? '✓ Các cặp ghép chính xác' : '✗ Chưa chính xác'}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div className="space-y-2">
+                                    <span className="text-xs font-black text-slate-700 uppercase">Cột A:</span>
+                                    {leftList.map((leftItem, lIdx) => {
+                                      const pairedRight = userPairs[leftItem];
+                                      return (
+                                        <div key={lIdx} className="p-2.5 bg-purple-50 rounded-xl border border-purple-200 text-xs font-bold flex items-center justify-between">
+                                          <span>{leftItem}</span>
+                                          {pairedRight && (
+                                            <span className="text-[10px] bg-purple-200 text-purple-900 px-2 py-0.5 rounded-full font-bold">
+                                              ➔ {pairedRight}
+                                            </span>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  <div className="space-y-2">
+                                    <span className="text-xs font-black text-slate-700 uppercase">Cột B (Lời giải nghĩa):</span>
+                                    {rightList.map((rightItem, rIdx) => (
+                                      <div key={rIdx} className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs font-medium">
+                                        {rightItem}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="pt-2 flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const canonical: Record<string, string> = {};
+                                      leftList.forEach((l, i) => {
+                                        canonical[l] = rightList[i];
+                                      });
+                                      setPreviewUserAnswers({ ...previewUserAnswers, [currQ.id]: canonical });
+                                    }}
+                                    className="px-3 py-1.5 bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold rounded-xl transition cursor-pointer"
+                                  >
+                                    Điền thử đáp án chuẩn
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (!isCorrect) {
+                                        setPreviewShowHint({ ...previewShowHint, [currQ.id]: true });
+                                      }
+                                    }}
+                                    className="px-4 py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-xl shadow-sm transition cursor-pointer"
+                                  >
+                                    Kiểm tra kết quả
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* 5. Fill Blank interactive preview (Nhiệm vụ B) */}
+                          {currQ.type === 'fill_blank' && (() => {
+                            const typedVal: string = previewUserAnswers[currQ.id] || '';
+                            const isCorrect = checkAnswerCorrectness(typedVal, targetCorrect, {
+                              type: 'fill_blank',
+                              acceptedAnswers: currQ.acceptedAnswers
+                            });
+                            const hasChecked = previewUserAnswers[currQ.id] !== undefined;
+
+                            return (
+                              <div className="space-y-3 pt-1">
+                                <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-800">
+                                  {currQ.blankContext || currQ.prompt}
+                                </div>
+                                <div className="flex flex-col sm:flex-row items-center gap-2">
+                                  <input
+                                    type="text"
+                                    value={typedVal}
+                                    onChange={(e) => setPreviewUserAnswers({ ...previewUserAnswers, [currQ.id]: e.target.value })}
+                                    placeholder="Gõ từ cần điền vào đây..."
+                                    className="flex-1 w-full px-4 py-2.5 bg-slate-50 border-2 border-slate-300 focus:border-sky-500 rounded-xl text-sm font-bold focus:bg-white focus:outline-none"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (!isCorrect) {
+                                        setPreviewShowHint({ ...previewShowHint, [currQ.id]: true });
+                                      }
+                                    }}
+                                    className="w-full sm:w-auto px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-black rounded-xl shadow-sm transition cursor-pointer"
+                                  >
+                                    Kiểm tra câu trả lời
+                                  </button>
+                                </div>
+                                {hasChecked && (
+                                  <div className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between ${
+                                    isCorrect ? 'bg-emerald-50 border-emerald-300 text-emerald-900' : 'bg-rose-50 border-rose-300 text-rose-900'
+                                  }`}>
+                                    <span>{isCorrect ? '✓ Đáp án chính xác!' : '✗ Chưa chính xác. Em hãy đọc lại gợi ý nhé.'}</span>
+                                    {!isCorrect && (
+                                      <span className="text-[11px] font-normal">
+                                        Đáp án chuẩn: <strong>{typeof targetCorrect === 'string' ? targetCorrect : JSON.stringify(targetCorrect)}</strong>
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             );
                           })()}

@@ -7,8 +7,20 @@ import { z } from 'zod';
 export type Grade = 2 | 3;
 export const GRADES: Grade[] = [2, 3];
 
-export type QuestionType = 'multiple_choice' | 'true_false' | 'sequence';
-export const QUESTION_TYPES: QuestionType[] = ['multiple_choice', 'true_false', 'sequence'];
+export type QuestionType =
+  | 'multiple_choice'
+  | 'true_false'
+  | 'sequence'
+  | 'matching'
+  | 'fill_blank';
+
+export const QUESTION_TYPES: QuestionType[] = [
+  'multiple_choice',
+  'true_false',
+  'sequence',
+  'matching',
+  'fill_blank'
+];
 
 export type DifficultyLevel = 'nhan_biet' | 'thong_hieu' | 'van_dung';
 export const DIFFICULTY_LEVELS: DifficultyLevel[] = ['nhan_biet', 'thong_hieu', 'van_dung'];
@@ -45,7 +57,9 @@ export const DIFFICULTY_LABELS: Record<DifficultyLevel, string> = {
 export const QUESTION_TYPE_LABELS: Record<string, string> = {
   multiple_choice: 'Trắc nghiệm A/B/C',
   true_false: 'Đúng / Sai',
-  sequence: 'Sắp xếp sự việc'
+  sequence: 'Sắp xếp sự việc',
+  matching: 'Ghép đôi tương ứng',
+  fill_blank: 'Điền khuyết ngắn'
 };
 
 // ==========================================
@@ -70,14 +84,20 @@ export interface PublicQuestion {
   prompt: string;
   options?: string[]; // Exactly 3 options for multiple_choice (A, B, C)
   statement?: string; // For true_false question
-  items?: string[]; // 3 items for sequence
+  items?: string[]; // 3+ items for sequence
+  leftItems?: string[]; // Left items for matching
+  rightItems?: string[]; // Right items for matching (shuffled)
+  blankContext?: string; // Sentence context with [ ... ] for fill_blank
+  blankPosition?: number;
   skillTag: SkillTag;
   difficulty: DifficultyLevel;
   relatedPassagePart?: string;
 }
 
 export interface QuestionAnswerDetail {
-  correctAnswer: string | boolean | string[]; // 'A'|'B'|'C', true|false, or string[] in correct chronological order
+  correctAnswer: any; // 'A'|'B'|'C', boolean, string[], Record<string, string>, or canonical string
+  acceptedAnswers?: string[]; // For fill_blank alternative accepted answers
+  matchingPairs?: Record<string, string> | Array<{ left: string; right: string }>;
   hint: string;
   explanation: string;
   scoringRules?: Record<string, any>;
@@ -91,18 +111,27 @@ export interface PrivateAnswerKey {
 
 // Full question format returned by AI or manual authoring before splitting
 export interface FullAuthoringQuestion extends PublicQuestion {
-  answer: string | boolean | string[];
+  answer: any;
+  correctAnswer?: any;
+  acceptedAnswers?: string[];
+  matchingPairs?: Record<string, string> | Array<{ left: string; right: string }>;
   hint: string;
   explanation: string;
 }
 
 export const FullAuthoringQuestionSchema = z.object({
   id: z.string(),
-  type: z.enum(['multiple_choice', 'true_false', 'sequence']),
+  type: z.enum(['multiple_choice', 'true_false', 'sequence', 'matching', 'fill_blank']),
   prompt: z.string().min(3, 'Câu hỏi quá ngắn'),
   options: z.array(z.string()).optional(),
   statement: z.string().optional(),
   items: z.array(z.string()).optional(),
+  leftItems: z.array(z.string()).optional(),
+  rightItems: z.array(z.string()).optional(),
+  blankContext: z.string().optional(),
+  blankPosition: z.number().optional(),
+  acceptedAnswers: z.array(z.string()).optional(),
+  matchingPairs: z.any().optional(),
   skillTag: z.enum([
     'thong_tin_truc_tiep',
     'tu_trong_ngu_canh',
@@ -112,7 +141,7 @@ export const FullAuthoringQuestionSchema = z.object({
   ]),
   difficulty: z.enum(['nhan_biet', 'thong_hieu', 'van_dung']),
   relatedPassagePart: z.string().optional(),
-  answer: z.union([z.string(), z.boolean(), z.array(z.string())]),
+  answer: z.any(),
   hint: z.string().min(3, 'Gợi ý cần có ý nghĩa sư phạm'),
   explanation: z.string().min(3, 'Giải thích cần rõ ràng cho học sinh')
 }).superRefine((data, ctx) => {
@@ -125,11 +154,27 @@ export const FullAuthoringQuestionSchema = z.object({
       });
     }
   } else if (data.type === 'sequence') {
-    if (!data.items || data.items.length !== 3) {
+    if (!data.items || data.items.length < 3) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Bài tập sắp xếp phải có đúng 3 sự việc',
+        message: 'Bài tập sắp xếp phải có ít nhất 3 sự việc',
         path: ['items']
+      });
+    }
+  } else if (data.type === 'matching') {
+    if (!data.leftItems || data.leftItems.length < 2 || !data.rightItems || data.rightItems.length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Bài ghép đôi cần tối thiểu 2 cặp đối tượng',
+        path: ['leftItems']
+      });
+    }
+  } else if (data.type === 'fill_blank') {
+    if (!data.answer || typeof data.answer !== 'string' || data.answer.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Bài điền khuyết phải có đáp án chữ hợp lệ',
+        path: ['answer']
       });
     }
   }

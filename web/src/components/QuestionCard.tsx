@@ -20,7 +20,11 @@ import {
   Send,
   ArrowRight,
   Check,
-  AlertTriangle
+  AlertTriangle,
+  Link2,
+  X,
+  GripVertical,
+  Edit3
 } from 'lucide-react';
 import { playCorrectSound, playWrongSound } from '../utils/soundEffects';
 
@@ -42,6 +46,15 @@ interface QuestionCardProps {
   onSkipQuestion?: (questionId: string) => void;
 }
 
+// Distinctive color themes for matching pairs
+const PAIR_COLORS = [
+  { bg: 'bg-sky-50', border: 'border-sky-400', text: 'text-sky-800', badge: 'bg-sky-500' },
+  { bg: 'bg-amber-50', border: 'border-amber-400', text: 'text-amber-800', badge: 'bg-amber-500' },
+  { bg: 'bg-emerald-50', border: 'border-emerald-400', text: 'text-emerald-800', badge: 'bg-emerald-500' },
+  { bg: 'bg-purple-50', border: 'border-purple-400', text: 'text-purple-800', badge: 'bg-purple-500' },
+  { bg: 'bg-rose-50', border: 'border-rose-400', text: 'text-rose-800', badge: 'bg-rose-500' }
+];
+
 export const QuestionCard: React.FC<QuestionCardProps> = ({
   question,
   index,
@@ -54,10 +67,12 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   onFinishMission,
   onSkipQuestion
 }) => {
-  // Gate 3: Check if question is corrupted (e.g. sequence with no items or MCQ with no options)
+  // Gate 3: Check if question is corrupted
   const isCorrupted =
     (question.type === 'sequence' && (!question.items || question.items.length < 2)) ||
-    (question.type === 'multiple_choice' && (!question.options || question.options.length < 2));
+    (question.type === 'multiple_choice' && (!question.options || question.options.length < 2)) ||
+    (question.type === 'matching' && (!question.leftItems || question.leftItems.length < 2 || !question.rightItems || question.rightItems.length < 2)) ||
+    (question.type === 'fill_blank' && !question.prompt && !question.blankContext);
 
   // Current user selection
   const [selectedAnswer, setSelectedAnswer] = useState<any>(() => {
@@ -69,8 +84,20 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     if (question.type === 'sequence') {
       return [...(question.items || [])];
     }
+    if (question.type === 'matching') {
+      return {};
+    }
+    if (question.type === 'fill_blank') {
+      return '';
+    }
     return null;
   });
+
+  // State for tap-to-match interaction (Matching question)
+  const [activeLeftItem, setActiveLeftItem] = useState<string | null>(null);
+
+  // Drag and drop state for Sequence
+  const [draggedSeqIdx, setDraggedSeqIdx] = useState<number | null>(null);
 
   const [phase, setPhase] = useState<'first_try' | 'retry'>(() => {
     if (existingResponse) {
@@ -122,10 +149,19 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
         setShowHintBox(false);
       }
     } else {
-      setSelectedAnswer(question.type === 'sequence' ? [...(question.items || [])] : null);
+      setSelectedAnswer(
+        question.type === 'sequence'
+          ? [...(question.items || [])]
+          : question.type === 'matching'
+          ? {}
+          : question.type === 'fill_blank'
+          ? ''
+          : null
+      );
       setPhase('first_try');
       setResult(null);
       setShowHintBox(false);
+      setActiveLeftItem(null);
     }
   }, [question.id, existingResponse]);
 
@@ -139,6 +175,14 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     }
     if (question.type === 'sequence') {
       return Array.isArray(selectedAnswer) && selectedAnswer.length === (question.items?.length || 3);
+    }
+    if (question.type === 'matching') {
+      const leftCount = question.leftItems?.length || 0;
+      if (!selectedAnswer || typeof selectedAnswer !== 'object') return false;
+      return Object.keys(selectedAnswer).length >= Math.min(2, leftCount);
+    }
+    if (question.type === 'fill_blank') {
+      return typeof selectedAnswer === 'string' && selectedAnswer.trim().length > 0;
     }
     return selectedAnswer !== null && selectedAnswer !== undefined;
   };
@@ -168,7 +212,6 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
         setShowHintBox(true);
         setPhase('retry');
       } else {
-        // Wrong on retry - completed with explanation
         playWrongSound();
         setShowHintBox(false);
       }
@@ -179,7 +222,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     }
   };
 
-  // Move item in sequence
+  // Move item in sequence via buttons
   const moveSequenceItem = (fromIndex: number, toIndex: number) => {
     if (isCompleted || (result && !result.canRetry)) return;
     const items = [...selectedAnswer];
@@ -188,8 +231,37 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     setSelectedAnswer(items);
   };
 
+  // Drag and drop for sequence
+  const handleSeqDragStart = (idx: number) => {
+    if (isCompleted) return;
+    setDraggedSeqIdx(idx);
+  };
+
+  const handleSeqDrop = (targetIdx: number) => {
+    if (isCompleted || draggedSeqIdx === null || draggedSeqIdx === targetIdx) return;
+    moveSequenceItem(draggedSeqIdx, targetIdx);
+    setDraggedSeqIdx(null);
+  };
+
+  // Matching handler: pair a left item with a right item
+  const handlePairItems = (left: string, right: string) => {
+    if (isCompleted || (result && !result.canRetry)) return;
+    const current = { ...(selectedAnswer || {}) };
+    current[left] = right;
+    setSelectedAnswer(current);
+    setActiveLeftItem(null);
+  };
+
+  // Unpair a matching pair
+  const handleUnpairLeft = (left: string) => {
+    if (isCompleted || (result && !result.canRetry)) return;
+    const current = { ...(selectedAnswer || {}) };
+    delete current[left];
+    setSelectedAnswer(current);
+  };
+
   return (
-    <div className="bg-white rounded-3xl p-5 md:p-8 shadow-md border-2 border-sky-100 transition-all flex flex-col justify-between min-h-[460px]">
+    <div className="bg-white rounded-3xl p-5 md:p-8 shadow-md border-2 border-sky-100 transition-all flex flex-col justify-between min-h-[480px]">
       <div>
         {/* Question Header & Meta */}
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4 pb-3 border-b border-slate-100">
@@ -198,7 +270,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
               Nhiệm vụ {index + 1} / {total}
             </span>
             <span className="px-2.5 py-1 bg-sky-100 text-sky-800 text-xs font-bold rounded-lg">
-              {QUESTION_TYPE_LABELS[question.type] || 'Trắc nghiệm'}
+              {QUESTION_TYPE_LABELS[question.type] || 'Đọc hiểu'}
             </span>
             <span className="px-2.5 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-lg">
               {SKILL_LABELS[question.skillTag] || question.skillTag}
@@ -255,7 +327,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                   type="button"
                   disabled={isCompleted || submitting}
                   onClick={() => setSelectedAnswer(letter)}
-                  className={`flex items-center gap-4 p-3.5 md:p-4 rounded-2xl text-left transition-all active:scale-[0.99] ${buttonStyle}`}
+                  className={`flex items-center gap-4 p-3.5 md:p-4 rounded-2xl text-left transition-all active:scale-[0.99] cursor-pointer ${buttonStyle}`}
                 >
                   <span
                     className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-base shrink-0 transition-colors ${badgeStyle}`}
@@ -291,7 +363,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 type="button"
                 disabled={isCompleted || submitting}
                 onClick={() => setSelectedAnswer(true)}
-                className={`p-4 md:p-5 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 font-black text-lg transition active:scale-95 ${
+                className={`p-4 md:p-5 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 font-black text-lg transition active:scale-95 cursor-pointer ${
                   selectedAnswer === true
                     ? 'bg-emerald-50 border-emerald-500 text-emerald-800 shadow-md ring-2 ring-emerald-300'
                     : 'bg-white border-slate-200 text-slate-700 hover:border-emerald-300 hover:bg-emerald-50/30'
@@ -305,7 +377,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 type="button"
                 disabled={isCompleted || submitting}
                 onClick={() => setSelectedAnswer(false)}
-                className={`p-4 md:p-5 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 font-black text-lg transition active:scale-95 ${
+                className={`p-4 md:p-5 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 font-black text-lg transition active:scale-95 cursor-pointer ${
                   selectedAnswer === false
                     ? 'bg-rose-50 border-rose-500 text-rose-800 shadow-md ring-2 ring-rose-300'
                     : 'bg-white border-slate-200 text-slate-700 hover:border-rose-300 hover:bg-rose-50/30'
@@ -318,42 +390,29 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
           </div>
         )}
 
-        {/* Gate 3: Corrupted Question Safe Fallback (Missing sequence items or options) */}
-        {isCorrupted && (
-          <div className="p-4 md:p-5 bg-amber-50 border-2 border-amber-300 rounded-3xl mb-6 shadow-sm animate-fade-in">
-            <div className="flex items-center gap-2 text-amber-900 font-extrabold text-sm md:text-base mb-1.5">
-              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-              <span>Nội dung câu hỏi đang được cập nhật</span>
-            </div>
-            <p className="text-xs md:text-sm text-amber-800 font-medium leading-relaxed mb-4">
-              Câu hỏi này đang được giáo viên cập nhật danh sách dữ liệu. Em hãy bấm nút <strong>"Bỏ qua câu này"</strong> bên dưới để tiếp tục bài làm mà không bị tính sai điểm nhé!
-            </p>
-            <button
-              type="button"
-              onClick={() => onSkipQuestion ? onSkipQuestion(question.id) : (isLastQuestion ? onFinishMission() : onNextQuestion())}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-black rounded-xl text-xs md:text-sm shadow transition cursor-pointer"
-            >
-              <span>Bỏ qua câu này (không trừ điểm)</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-
-        {/* 3. Sequence (3 Items Order) */}
+        {/* 3. Sequence (Drag & Drop + Up/Down Buttons) */}
         {question.type === 'sequence' && !isCorrupted && Array.isArray(selectedAnswer) && (
           <div className="space-y-3 mb-6">
-            <p className="text-xs md:text-sm font-semibold text-slate-500 italic">
-              * Dùng nút mũi tên Lên / Xuống để sắp xếp đúng thứ tự thời gian:
+            <p className="text-xs md:text-sm font-semibold text-slate-500 italic flex items-center gap-1.5">
+              <GripVertical className="w-4 h-4 text-sky-500" />
+              <span>Kéo thả để đổi thứ tự, hoặc dùng các nút mũi tên Lên / Xuống:</span>
             </p>
             {selectedAnswer.map((item: string, idx: number) => (
               <div
                 key={idx}
+                draggable={!isCompleted}
+                onDragStart={() => handleSeqDragStart(idx)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => handleSeqDrop(idx)}
                 className={`flex items-center gap-3 p-3.5 rounded-2xl border-2 transition ${
-                  isCompleted
+                  draggedSeqIdx === idx
+                    ? 'opacity-40 border-dashed border-primary-500'
+                    : isCompleted
                     ? 'bg-slate-50 border-slate-200 text-slate-700'
-                    : 'bg-white border-sky-200 hover:border-sky-400 shadow-sm'
+                    : 'bg-white border-sky-200 hover:border-sky-400 shadow-sm cursor-grab active:cursor-grabbing'
                 }`}
               >
+                <GripVertical className="w-4 h-4 text-slate-300 shrink-0 hidden md:block" />
                 <span className="w-7 h-7 rounded-full bg-primary-100 text-primary-800 font-black text-sm flex items-center justify-center shrink-0">
                   {idx + 1}
                 </span>
@@ -367,7 +426,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                       type="button"
                       disabled={idx === 0 || submitting}
                       onClick={() => moveSequenceItem(idx, idx - 1)}
-                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-sky-100 text-slate-600 disabled:opacity-30 disabled:pointer-events-none transition"
+                      className="p-2 rounded-xl bg-slate-100 hover:bg-sky-100 text-slate-600 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
                       title="Di chuyển lên"
                     >
                       <ArrowUp className="w-4 h-4" />
@@ -376,7 +435,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                       type="button"
                       disabled={idx === selectedAnswer.length - 1 || submitting}
                       onClick={() => moveSequenceItem(idx, idx + 1)}
-                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-sky-100 text-slate-600 disabled:opacity-30 disabled:pointer-events-none transition"
+                      className="p-2 rounded-xl bg-slate-100 hover:bg-sky-100 text-slate-600 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
                       title="Di chuyển xuống"
                     >
                       <ArrowDown className="w-4 h-4" />
@@ -385,6 +444,190 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* 4. Matching (Ghép đôi kéo thả + chạm/click để ghép) */}
+        {question.type === 'matching' && !isCorrupted && question.leftItems && question.rightItems && (
+          <div className="space-y-4 mb-6">
+            <div className="p-3 bg-sky-50/70 border border-sky-200 rounded-2xl text-xs md:text-sm text-sky-900 font-semibold flex items-center gap-2">
+              <Link2 className="w-4 h-4 text-sky-600 shrink-0" />
+              <span>Chạm hoặc kéo từ <strong>Cột A</strong> rồi chọn nội dung tương ứng ở <strong>Cột B</strong> để ghép đôi:</span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Left Column (Cột A) */}
+              <div className="space-y-2.5">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Cột A (Từ ngữ / Sự việc)
+                </span>
+                {question.leftItems.map((leftText, lIdx) => {
+                  const pairedRight = selectedAnswer?.[leftText];
+                  const isPaired = Boolean(pairedRight);
+                  const isActive = activeLeftItem === leftText;
+                  const colorTheme = isPaired ? PAIR_COLORS[lIdx % PAIR_COLORS.length] : null;
+
+                  return (
+                    <div
+                      key={lIdx}
+                      draggable={!isCompleted}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', leftText);
+                        setActiveLeftItem(leftText);
+                      }}
+                      onClick={() => !isCompleted && setActiveLeftItem(isActive ? null : leftText)}
+                      className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer relative ${
+                        isActive
+                          ? 'border-primary-500 bg-primary-50 ring-2 ring-primary-300 shadow-md'
+                          : isPaired
+                          ? `${colorTheme?.bg} ${colorTheme?.border} shadow-sm`
+                          : 'bg-white border-slate-200 hover:border-sky-300 hover:bg-sky-50/30'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <span className={`w-6 h-6 rounded-full text-xs font-black flex items-center justify-center shrink-0 ${isPaired ? `${colorTheme?.badge} text-white` : 'bg-slate-200 text-slate-700'}`}>
+                            {lIdx + 1}
+                          </span>
+                          <span className="font-bold text-sm md:text-base text-slate-800">
+                            {cleanOptionText(leftText)}
+                          </span>
+                        </div>
+                        {isPaired && !isCompleted && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleUnpairLeft(leftText);
+                            }}
+                            className="p-1 rounded-lg hover:bg-rose-100 text-slate-400 hover:text-rose-600 transition"
+                            title="Hủy ghép đôi"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                      {isPaired && (
+                        <div className="mt-2 text-xs font-semibold text-slate-600 bg-white/80 p-1.5 rounded-lg border border-slate-200 flex items-center gap-1.5 truncate">
+                          <Link2 className="w-3.5 h-3.5 text-primary-600 shrink-0" />
+                          <span className="truncate">Nối với: <strong>{cleanOptionText(pairedRight)}</strong></span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Right Column (Cột B) */}
+              <div className="space-y-2.5">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Cột B (Nghĩa / Nội dung)
+                </span>
+                {question.rightItems.map((rightText, rIdx) => {
+                  // Find which left item (if any) is paired with this right item
+                  const pairedLeft = selectedAnswer
+                    ? Object.keys(selectedAnswer).find((k) => selectedAnswer[k] === rightText)
+                    : null;
+                  const isPaired = Boolean(pairedLeft);
+                  const lIdx = pairedLeft ? question.leftItems?.indexOf(pairedLeft) ?? -1 : -1;
+                  const colorTheme = isPaired && lIdx >= 0 ? PAIR_COLORS[lIdx % PAIR_COLORS.length] : null;
+
+                  return (
+                    <div
+                      key={rIdx}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const left = e.dataTransfer.getData('text/plain') || activeLeftItem;
+                        if (left) handlePairItems(left, rightText);
+                      }}
+                      onClick={() => {
+                        if (activeLeftItem) {
+                          handlePairItems(activeLeftItem, rightText);
+                        }
+                      }}
+                      className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer relative ${
+                        isPaired
+                          ? `${colorTheme?.bg} ${colorTheme?.border} shadow-sm`
+                          : activeLeftItem
+                          ? 'bg-amber-50/60 border-amber-300 hover:border-amber-500 animate-pulse'
+                          : 'bg-white border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className={`w-6 h-6 rounded-full text-xs font-black flex items-center justify-center shrink-0 ${isPaired ? `${colorTheme?.badge} text-white` : 'bg-slate-100 text-slate-600'}`}>
+                          {String.fromCharCode(65 + rIdx)}
+                        </span>
+                        <span className="font-semibold text-sm md:text-base text-slate-800 flex-1">
+                          {cleanOptionText(rightText)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 5. Fill in the Blank (Điền khuyết ngắn) */}
+        {question.type === 'fill_blank' && !isCorrupted && (
+          <div className="space-y-4 mb-6">
+            {question.blankContext && (
+              <div className="p-4 bg-sky-50/80 border-2 border-sky-200 rounded-2xl text-base md:text-lg font-bold text-slate-800 leading-relaxed">
+                {question.blankContext}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+                Nhập câu trả lời của em:
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  disabled={isCompleted || submitting}
+                  value={selectedAnswer || ''}
+                  onChange={(e) => setSelectedAnswer(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSubmit();
+                    }
+                  }}
+                  placeholder="Nhập 1-2 từ ngữ thích hợp vào đây..."
+                  className={`w-full p-4 rounded-2xl border-2 text-base md:text-lg font-bold outline-none transition-all shadow-sm ${
+                    isCompleted
+                      ? result?.correct
+                        ? 'border-emerald-500 bg-emerald-50/60 text-emerald-900'
+                        : 'border-rose-400 bg-rose-50/60 text-rose-900'
+                      : 'border-sky-300 focus:border-primary-500 focus:ring-4 focus:ring-primary-100 bg-white text-slate-800'
+                  }`}
+                />
+                <Edit3 className="w-5 h-5 text-slate-400 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Gate 3: Corrupted Question Safe Fallback */}
+        {isCorrupted && (
+          <div className="p-4 md:p-5 bg-amber-50 border-2 border-amber-300 rounded-3xl mb-6 shadow-sm animate-fade-in">
+            <div className="flex items-center gap-2 text-amber-900 font-extrabold text-sm md:text-base mb-1.5">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+              <span>Nội dung câu hỏi đang được cập nhật</span>
+            </div>
+            <p className="text-xs md:text-sm text-amber-800 font-medium leading-relaxed mb-4">
+              Câu hỏi này đang được giáo viên cập nhật dữ liệu. Em hãy bấm nút <strong>"Bỏ qua câu này"</strong> bên dưới để tiếp tục bài làm mà không bị tính sai điểm nhé!
+            </p>
+            <button
+              type="button"
+              onClick={() => onSkipQuestion ? onSkipQuestion(question.id) : (isLastQuestion ? onFinishMission() : onNextQuestion())}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-black rounded-xl text-xs md:text-sm shadow transition cursor-pointer"
+            >
+              <span>Bỏ qua câu này (không trừ điểm)</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
           </div>
         )}
 
@@ -435,6 +678,18 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 {result.explanation}
               </p>
             )}
+
+            {/* Display correct answer for fill_blank or matching if incorrect */}
+            {!result.correct && result.correctAnswer && (
+              <div className="mt-2.5 pt-2 border-t border-rose-200/60 text-xs md:text-sm font-bold text-rose-900">
+                <span>Đáp án đúng của bài: </span>
+                <span className="underline">
+                  {typeof result.correctAnswer === 'object'
+                    ? JSON.stringify(result.correctAnswer)
+                    : String(result.correctAnswer)}
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -453,11 +708,21 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 : question.type === 'true_false'
                 ? 'Em hãy chọn Đúng hoặc Sai.'
                 : question.type === 'sequence'
-                ? 'Em hãy sắp xếp đầy đủ các sự việc theo đúng trình tự.'
+                ? 'Em hãy sắp xếp các sự việc theo đúng trình tự.'
+                : question.type === 'matching'
+                ? 'Em hãy ghép nối tất cả các cặp tương ứng.'
+                : question.type === 'fill_blank'
+                ? 'Em hãy điền từ vào chỗ trống.'
                 : 'Vui lòng chọn câu trả lời')
             : phase === 'retry'
             ? 'Được thử lại 1 lần sau gợi ý'
-            : (question.type === 'sequence' ? 'Đã sắp xếp thứ tự' : 'Đã chọn đáp án')}
+            : (question.type === 'sequence'
+                ? 'Đã sắp xếp thứ tự'
+                : question.type === 'matching'
+                ? 'Đã ghép đôi các cặp'
+                : question.type === 'fill_blank'
+                ? 'Đã nhập câu trả lời'
+                : 'Đã chọn đáp án')}
         </div>
 
         {/* Action button on right */}

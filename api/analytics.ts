@@ -1202,7 +1202,8 @@ async function handleSuggestRemediation(req: VercelApiRequest, data: any) {
   // Try live Gemini AI if API key is present
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY;
   if (apiKey) {
-    const activeModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+    const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+    const fallbackModel = 'gemini-3.5-flash-lite';
     try {
       const prompt = `Bạn là chuyên gia phương pháp dạy học Tiếng Việt tiểu học (Lớp ${targetGrade}, Chuẩn GDPT 2018).
 Dưới đây là báo cáo thống kê ẩn danh thực tế của lớp ${className}:
@@ -1218,19 +1219,53 @@ BẮT BUỘC trả về định dạng JSON thuần dạng:
   "suggestedActivities": [ ... ]
 }`;
 
-      const aiResponse = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: 'application/json' }
-          })
-        }
-      );
+      let aiResponse: any = null;
+      let usedModel = primaryModel;
 
-      if (aiResponse.ok) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        aiResponse = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${primaryModel}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: prompt }] }],
+              generationConfig: { responseMimeType: 'application/json' }
+            }),
+            signal: controller.signal
+          }
+        );
+        clearTimeout(timeoutId);
+      } catch (err: any) {
+        console.warn(`[Gemini AI Remediation] Primary model ${primaryModel} failed: ${err.message}. Trying fallback...`);
+      }
+
+      if (!aiResponse || !aiResponse.ok) {
+        usedModel = fallbackModel;
+        const fbController = new AbortController();
+        const fbTimeoutId = setTimeout(() => fbController.abort(), 15000);
+        try {
+          aiResponse = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${fallbackModel}:generateContent?key=${apiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                generationConfig: { responseMimeType: 'application/json' }
+              }),
+              signal: fbController.signal
+            }
+          );
+          clearTimeout(fbTimeoutId);
+        } catch {
+          clearTimeout(fbTimeoutId);
+        }
+      }
+
+      if (aiResponse && aiResponse.ok) {
         const aiData: any = await aiResponse.json();
         const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
         if (rawText) {
