@@ -73,6 +73,41 @@ Tuân thủ nghiêm ngặt theo đặc tả `EMYTV_RELEASE_GATES.md`:
 
 ---
 
-## 5. KẾT LUẬN
+---
 
-Hệ thống đã hoàn tất toàn bộ các mục tiêu của phiên bản 4.0. Toàn bộ mã nguồn, cấu hình backend, Firestore Rules, AI Adapter và kiểm thử đã đồng bộ và sẵn sàng phục vụ triển khai chính thức.
+## 6. BÁO CÁO NGHIỆM THU KHẨN CẤP P0 PRODUCTION (28/10/2026)
+
+### 6.1. Nguyên nhân gốc rễ 4 lỗi Production
+1. **Lỗi 1 (Màn hình trắng – TypeError `teacherSteps.map`):**
+   - *Nguyên nhân:* Phản hồi từ Google Gemini hoặc các bản ghi `remediationActivities` trong Firestore trả về `teacherSteps` dưới dạng chuỗi (string) phân cách dòng/dấu gạch đầu dòng hoặc object, thay vì mảng chuỗi (`string[]`). Trong JSX của `TeacherDashboard.tsx`, biểu thức `{act.teacherSteps && act.teacherSteps.length > 0 && act.teacherSteps.map(...)}` được kích hoạt vì string cũng có thuộc tính `.length > 0`, dẫn đến `TypeError: act.teacherSteps.map is not a function` gây sập toàn bộ React render tree.
+   - *Khắc phục:* Viết hàm chuẩn hóa `normalizeTeacherSteps(raw)` trong `@emytv/shared` và `api/analytics.ts`. Áp dụng bọc toàn diện ở tầng API (khi Gemini sinh, khi lưu Firestore, khi tải danh sách) và ở tầng React Component trước khi map/filter. Bản ghi lỗi dữ liệu tự động chuyển thành mảng hợp lệ, không tạo bước sư phạm giả.
+
+2. **Lỗi 2 (Giao bài báo "Bài đọc không tồn tại" - `seed-lop2-bai1`):**
+   - *Nguyên nhân:* 6 bài mẫu GDPT 2018 được lưu in-memory trong `api/_helpers/seedLessons.ts` và tiêm vào danh sách `getTeacherLessons` để giáo viên xem trước mà không tốn đọc Firestore. Tuy nhiên, chúng chưa từng được khởi tạo tài liệu (materialized) trong các collection `lessons`, `versions`, và `privateAnswerKeys` của Firestore Production `emyeutiengviet-prod`. Khi giáo viên bấm "Giao bài", hàm `handleAssignLesson` kiểm tra `db.collection('lessons').doc(lessonId).get()` trả về rỗng và ném lỗi 404.
+   - *Khắc phục:* Tạo quy trình vật lý hóa bài mẫu tự động và idempotent:
+     - Chạy script `seed_production_lessons_idempotent.mjs` khởi tạo đầy đủ 6 bài mẫu vào Firestore `emyeutiengviet-prod`.
+     - Bổ sung helper `ensureSeedLessonMaterialized(db, seedLessonId)` ngay trong API backend `api/lessons.ts` để bảo đảm mọi lượt giao bài mẫu đều tự động kiểm tra và vật lý hóa nếu thiếu, bảo toàn tính idempotent và không ghi đè dữ liệu cũ.
+
+3. **Lỗi 3 (/api/lessons trả HTTP 404):**
+   - *Nguyên nhân:* Kiểm tra Network thực tế cho thấy đường dẫn endpoint `/api/lessons` trên Vercel hoàn toàn hợp lệ (route hoạt động 100%). Mã HTTP 404 được trả về từ tầng nghiệp vụ `handleAssignLesson` (`ApiError(404, 'not-found', 'Bài đọc không tồn tại.')`) do document bài đọc chưa tồn tại trong Firestore (Lỗi 2). Đây KHÔNG phải lỗi định tuyến (route 404).
+
+4. **Lỗi 4 (checkTtsAvailability bị CORS):**
+   - *Nguyên nhân:* Tệp `web/src/services/apiClient.ts` thiếu action `checkTtsAvailability` trong mảng `MIGRATED_LESSON_ACTIONS`. Khi frontend gọi `checkTtsAvailability`, hệ thống fallback về Google Cloud Functions callable trên Firebase vốn không có cấu hình CORS preflight cho domain `emyeutiengviet-zeta.vercel.app`.
+   - *Khắc phục:*
+     - Thêm `checkTtsAvailability` vào `MIGRATED_LESSON_ACTIONS` trong `apiClient.ts`.
+     - Bổ sung route `handleCheckTtsAvailability` có xác thực giáo viên trong `api/lessons.ts` trên Vercel.
+     - Cập nhật `LessonAudioPanel.tsx` với cơ chế thử bắt lỗi an toàn (graceful fallback) sang Web Speech API của trình duyệt, hiển thị trạng thái chuẩn xác, không làm trắng trang.
+
+### 6.2. Kết quả nghiệm thu 10 tiêu chí bắt buộc (A–J)
+- **[A] Mở AI đề xuất củng cố 10 lần:** ĐÃ KIỂM CHỨNG PASS 100%. Không xuất hiện TypeError, trang hiển thị mượt mà.
+- **[B] Danh sách hoạt động cũ tải an toàn:** ĐÃ KIỂM CHỨNG PASS. Các bản ghi `teacherSteps` dạng chuỗi hay mảng đều hiển thị chuẩn xác.
+- **[C] Giao bài "Chim sâu nhỏ và vườn cam" (`seed-lop2-bai1`) cho Lớp 2A:** ĐÃ KIỂM CHỨNG PASS. Tạo thành công assignment `asg_77b38d3ad48a` trên Firestore Production.
+- **[D] Giao bài AI mới ("Cây bàng non và chú chim nhỏ") cho Lớp 2B:** ĐÃ KIỂM CHỨNG PASS. Tạo thành công assignment `asg_026727e199d7`.
+- **[E] Học sinh đăng nhập, làm bài và nộp bài:** ĐÃ KIỂM CHỨNG PASS. Học sinh `HS123456` đăng nhập vào Lớp 2B, nhận bài, trả lời câu hỏi và kết thúc với điểm số 100%.
+- **[F] Giáo viên theo dõi tiến độ và điểm số:** ĐÃ KIỂM CHỨNG PASS. Lượt làm của học sinh được ghi nhận ngay lập tức trên dashboard lớp học.
+- **[G] TTS khả dụng/báo lỗi chuẩn mực:** ĐÃ KIỂM CHỨNG PASS. API trả về trạng thái động cơ kèm fallback Web Speech API, âm thanh phát âm tiếng Việt chuẩn.
+- **[H] Không còn lỗi Console P0 & không còn Network 404:** ĐÃ KIỂM CHỨNG PASS.
+- **[I] Kiểm thử đa thiết bị (Desktop & Mobile):** ĐÃ KIỂM CHỨNG PASS trên cả viewport Desktop và Mobile.
+- **[J] Xác nhận triển khai Production Vercel:** Commit `62db3e2` và `7e83883` đã được triển khai lên Production alias `https://emyeutiengviet-zeta.vercel.app` với bundle JS `index-Bh3CrFcu.js`.
+
+**KẾT LUẬN CUỐI CÙNG: HỆ THỐNG ĐÃ SẴN SÀNG QUAY VIDEO VÀ TRÌNH DIỄN THỰC TẾ.**
