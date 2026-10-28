@@ -1245,7 +1245,7 @@ async function handleSuggestRemediation(req: VercelApiRequest, data: any) {
   // Try live Gemini AI if API key is present
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY;
   if (apiKey) {
-    const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+    const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
     const fallbackModel = 'gemini-3.5-flash-lite';
     try {
       const prompt = `Bạn là chuyên gia phương pháp dạy học Tiếng Việt tiểu học (Lớp ${targetGrade}, Chuẩn GDPT 2018).
@@ -1267,7 +1267,7 @@ BẮT BUỘC trả về định dạng JSON thuần dạng:
 
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const timeoutId = setTimeout(() => controller.abort(), 35000);
         aiResponse = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${primaryModel}:generateContent?key=${apiKey}`,
           {
@@ -1288,7 +1288,7 @@ BẮT BUỘC trả về định dạng JSON thuần dạng:
       if (!aiResponse || !aiResponse.ok) {
         usedModel = fallbackModel;
         const fbController = new AbortController();
-        const fbTimeoutId = setTimeout(() => fbController.abort(), 15000);
+        const fbTimeoutId = setTimeout(() => fbController.abort(), 35000);
         try {
           aiResponse = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/${fallbackModel}:generateContent?key=${apiKey}`,

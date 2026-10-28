@@ -23,7 +23,7 @@ import {
 // 1. MODEL DEFINITIONS & LOCAL SECRETS LOADER
 // ==========================================
 
-export const PRIMARY_GEMINI_MODEL = 'gemini-3.8-flash';
+export const PRIMARY_GEMINI_MODEL = 'gemini-3.5-flash';
 export const FALLBACK_GEMINI_MODEL = 'gemini-3.5-flash-lite';
 export const DEFAULT_GEMINI_MODEL = PRIMARY_GEMINI_MODEL;
 export const HIGH_QUALITY_GEMINI_MODEL = PRIMARY_GEMINI_MODEL;

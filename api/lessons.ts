@@ -1081,8 +1081,9 @@ async function handleAssignLesson(req: VercelApiRequest, data: any) {
 // 8. GEMINI AI INTEGRATION (STANDARDIZED: PRIMARY 3.8-FLASH, FALLBACK 3.5-FLASH-LITE)
 // ==========================================
 
-export const PRIMARY_GEMINI_MODEL = 'gemini-3.8-flash';
+export const PRIMARY_GEMINI_MODEL = 'gemini-3.5-flash';
 export const FALLBACK_GEMINI_MODEL = 'gemini-3.5-flash-lite';
+export const SECONDARY_GEMINI_MODEL = 'gemini-3.8-flash';
 
 // In-memory cache for AI status to prevent blocking every page load with external network ping
 let cachedAIStatus: { result: any; timestamp: number } | null = null;
@@ -1101,7 +1102,8 @@ async function executeGeminiPing(apiKey: string): Promise<{
   const primaryModel = process.env.GEMINI_MODEL || PRIMARY_GEMINI_MODEL;
   const candidateModels = [
     primaryModel,
-    FALLBACK_GEMINI_MODEL
+    FALLBACK_GEMINI_MODEL,
+    SECONDARY_GEMINI_MODEL
   ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
   let lastStatus = 500;
@@ -1112,7 +1114,7 @@ async function executeGeminiPing(apiKey: string): Promise<{
     const isFallback = i > 0;
     const startTime = Date.now();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
     try {
       const response = await fetch(
@@ -1143,8 +1145,9 @@ async function executeGeminiPing(apiKey: string): Promise<{
       lastRawError = e.message;
       if (e.name === 'AbortError') {
         lastStatus = 408;
+        lastRawError = 'Quá thời gian kiểm tra kết nối AI (TIMEOUT_408): Google AI phản hồi chậm hơn 8 giây.';
       }
-      console.warn(`[Gemini AI] Ping model "${model}" error: ${e.message}`);
+      console.warn(`[Gemini AI] Ping model "${model}" error: ${lastRawError}`);
     }
   }
 
@@ -1266,7 +1269,7 @@ Trả về DUY NHẤT định dạng JSON thuần dạng:
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
     response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${primaryModel}:generateContent?key=${apiKey}`,
       {
@@ -1287,17 +1290,21 @@ Trả về DUY NHẤT định dạng JSON thuần dạng:
       console.warn(`[Gemini AI] Primary model "${primaryModel}" error (HTTP ${lastStatus}). Switching to fallback model "${fallbackModel}"...`);
     }
   } catch (err: any) {
-    primaryErrorDesc = `Primary model ${primaryModel} exception: ${err.message}`;
-    console.warn(`[Gemini AI] Primary model "${primaryModel}" threw error: ${err.message}. Switching to fallback model "${fallbackModel}"...`);
+    if (err.name === 'AbortError') {
+      primaryErrorDesc = `Quá thời gian tạo học liệu mô hình ${primaryModel} (vượt quá 45 giây).`;
+    } else {
+      primaryErrorDesc = `Primary model ${primaryModel} exception: ${err.message}`;
+    }
+    console.warn(`[Gemini AI] Primary model "${primaryModel}" failed (${primaryErrorDesc}). Switching to fallback model "${fallbackModel}"...`);
   }
 
-  // Fallback to verified gemini-3.5-flash-lite if primary model failed
+  // Fallback to verified fallbackModel if primary model failed
   if (!response || !response.ok) {
     usedModel = fallbackModel;
     fallbackUsed = true;
     console.log(`[Gemini AI] Executing verified fallback model: "${fallbackModel}"...`);
     const fbController = new AbortController();
-    const fbTimeoutId = setTimeout(() => fbController.abort(), 25000);
+    const fbTimeoutId = setTimeout(() => fbController.abort(), 45000);
     try {
       response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${fallbackModel}:generateContent?key=${apiKey}`,
@@ -1314,11 +1321,17 @@ Trả về DUY NHẤT định dạng JSON thuần dạng:
       clearTimeout(fbTimeoutId);
       if (!response.ok) {
         const fbErrText = await response.text();
+        if (response.status === 429) {
+          throw new ApiError(429, 'resource-exhausted', `Hạn ngạch Google Gemini API tạm thời đạt giới hạn (QUOTA_429). Hệ thống đang duy trì chế độ Soạn bài thủ công và 6 bài đọc mẫu chuẩn GDPT 2018.`);
+        }
         throw new ApiError(502, 'internal', `Dịch vụ Gemini AI (Dự phòng ${fallbackModel}) phản hồi lỗi (HTTP ${response.status}): ${fbErrText.slice(0, 150)}`);
       }
     } catch (fbErr: any) {
       clearTimeout(fbTimeoutId);
       if (fbErr instanceof ApiError) throw fbErr;
+      if (fbErr.name === 'AbortError') {
+        throw new ApiError(504, 'deadline-exceeded', `Quá trình tạo học liệu AI bằng mô hình ${fallbackModel} vượt quá thời gian cho phép (45 giây). Vui lòng thử lại với số lượng câu hỏi ít hơn hoặc chủ đề ngắn hơn.`);
+      }
       throw new ApiError(502, 'internal', `Không thể kết nối dịch vụ Gemini AI (${fallbackModel}): ${fbErr.message}`);
     }
   }
