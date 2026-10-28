@@ -59,6 +59,7 @@ export const MIGRATED_LESSON_ACTIONS = new Set<string>([
   'testAIConnection',
   'generateLessonAudioWithAI',
   'approveLessonAudio',
+  'checkTtsAvailability',
   'getAssignmentProgress',
   'getStudentAttemptDetail'
 ]);

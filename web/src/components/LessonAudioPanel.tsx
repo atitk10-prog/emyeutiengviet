@@ -80,6 +80,7 @@ export const LessonAudioPanel: React.FC<LessonAudioPanelProps> = ({
   const [engineStatus, setEngineStatus] = useState<{
     gemini?: { available: boolean; reason?: string };
     piper?: { available: boolean; reason?: string };
+    webSpeech?: { available: boolean; reason?: string };
   }>({});
 
   // Gemini parameters
@@ -132,8 +133,15 @@ export const LessonAudioPanel: React.FC<LessonAudioPanelProps> = ({
             setSelectedEngine('piper_tts');
           }
         }
-      } catch (e) {
-        // Fallback default
+      } catch (e: any) {
+        console.warn('Kiểm tra TTS engine: Sử dụng Web Speech API trình duyệt fallback:', e?.message || e);
+        if (isMounted) {
+          setEngineStatus({
+            gemini: { available: false, reason: 'Chưa cấu hình API key TTS đám mây.' },
+            piper: { available: false, reason: 'Không khả dụng trên môi trường web.' },
+            webSpeech: { available: true, reason: 'Hỗ trợ phát âm qua Web Speech API trình duyệt.' }
+          });
+        }
       }
     };
     fetchTtsStatus();

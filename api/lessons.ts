@@ -104,6 +104,10 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
         result = await handleApproveLessonAudio(req, data);
         break;
 
+      case 'checkTtsAvailability':
+        result = await handleCheckTtsAvailability(req);
+        break;
+
       case 'getAssignmentProgress':
         result = await handleGetAssignmentProgress(req, data);
         break;
@@ -227,6 +231,120 @@ function buildSeedLessonDetailResponse(seed: any, isOwner: boolean) {
     privateAnswers: isOwner ? privateAnswersMap : null,
     privateAnswersList: isOwner ? privateAnswersList : []
   };
+}
+
+// Helper to materialize seed lesson into Firestore on-the-fly (Idempotent)
+async function ensureSeedLessonMaterialized(db: FirebaseFirestore.Firestore, seedLessonId: string): Promise<boolean> {
+  const seed = findSeedLesson(seedLessonId);
+  if (!seed) return false;
+
+  const versionId = `${seed.id}-v1`;
+  const lessonRef = db.collection('lessons').doc(seed.id);
+  const versionRef = lessonRef.collection('versions').doc(versionId);
+  const answerKeyRef = db.collection('privateAnswerKeys').doc(versionId);
+
+  const [lessonDoc, versionDoc, answerKeyDoc] = await Promise.all([
+    lessonRef.get(),
+    versionRef.get(),
+    answerKeyRef.get()
+  ]);
+
+  const batch = db.batch();
+  let hasWrites = false;
+
+  if (!lessonDoc.exists) {
+    const lessonData = {
+      id: seed.id,
+      teacherUid: 'system',
+      title: seed.title,
+      topic: seed.topic,
+      grade: seed.grade,
+      semester: (seed as any).semester || (seed.grade === 2 && seed.id === 'seed-lop2-bai3' ? 1 : seed.grade === 3 && seed.id === 'seed-lop3-bai3' ? 1 : 1),
+      week: (seed as any).week || (seed.id === 'seed-lop2-bai1' ? 3 : seed.id === 'seed-lop2-bai2' ? 5 : seed.id === 'seed-lop2-bai3' ? 16 : seed.id === 'seed-lop3-bai1' ? 3 : seed.id === 'seed-lop3-bai2' ? 6 : 15),
+      academicYearScope: 'shared',
+      academicYear: '2026-2027',
+      passage: seed.passage,
+      vocabulary: seed.vocabulary,
+      status: 'published',
+      currentVersionId: versionId,
+      currentVersionNumber: 1,
+      totalQuestions: seed.questions.length,
+      questionCount: seed.questions.length,
+      isSystemLesson: true,
+      createdAt: 1700000000000,
+      updatedAt: 1700000000000
+    };
+    batch.set(lessonRef, lessonData);
+    hasWrites = true;
+  }
+
+  if (!versionDoc.exists) {
+    const publicQuestions = seed.questions.map((q: any) => ({
+      id: q.id,
+      type: q.type,
+      prompt: q.prompt,
+      options: q.options || undefined,
+      statement: q.statement || undefined,
+      items: q.items || undefined,
+      pairs: q.pairs || undefined,
+      passageWithBlanks: q.passageWithBlanks || undefined,
+      blanks: q.blanks || undefined,
+      skillTag: q.skillTag,
+      difficulty: q.difficulty,
+      relatedPassagePart: q.relatedPassagePart || ''
+    }));
+
+    const versionData = {
+      versionId,
+      lessonId: seed.id,
+      versionNumber: 1,
+      title: seed.title,
+      passage: seed.passage,
+      grade: seed.grade,
+      topic: seed.topic,
+      semester: (seed as any).semester || 1,
+      week: (seed as any).week || 1,
+      vocabulary: seed.vocabulary,
+      publicQuestions,
+      totalQuestions: seed.questions.length,
+      status: 'published',
+      createdAt: 1700000000000,
+      publishedAt: 1700000000000
+    };
+    batch.set(versionRef, versionData);
+    hasWrites = true;
+  }
+
+  if (!answerKeyDoc.exists) {
+    const answers: Record<string, any> = {};
+    seed.questions.forEach((q: any) => {
+      answers[q.id] = {
+        questionId: q.id,
+        id: q.id,
+        correctAnswer: q.answer,
+        answer: q.answer,
+        matchingPairs: q.type === 'matching' && typeof q.answer === 'object' ? q.answer : undefined,
+        hint: q.hint || '',
+        explanation: q.explanation || ''
+      };
+    });
+
+    const answerKeyData = {
+      versionId,
+      lessonId: seed.id,
+      answers,
+      scoringRules: {},
+      createdAt: 1700000000000,
+      updatedAt: 1700000000000
+    };
+    batch.set(answerKeyRef, answerKeyData);
+    hasWrites = true;
+  }
+
+  if (hasWrites) {
+    await batch.commit();
+  }
+  return true;
 }
 
 // 1. GET TEACHER LESSONS (With Caching and Bounded Queries)
@@ -841,15 +959,35 @@ async function handleAssignLesson(req: VercelApiRequest, data: any) {
   }
 
   const db = getDb();
-  const lessonDoc = await db.collection('lessons').doc(lessonId).get();
-  if (!lessonDoc.exists) throw new ApiError(404, 'not-found', 'Bài đọc không tồn tại.');
+  let lessonDoc = await db.collection('lessons').doc(lessonId).get();
+  if (!lessonDoc.exists) {
+    const seed = findSeedLesson(lessonId);
+    if (seed) {
+      await ensureSeedLessonMaterialized(db, lessonId);
+      lessonDoc = await db.collection('lessons').doc(lessonId).get();
+    }
+  }
+  if (!lessonDoc.exists) {
+    throw new ApiError(404, 'not-found', `Bài đọc không tồn tại (Mã: ${lessonId}). Vui lòng kiểm tra lại danh sách bài đọc.`);
+  }
   const lessonData = lessonDoc.data()!;
 
   const targetVersionId = versionId || lessonData.currentVersionId;
-  if (!targetVersionId) throw new ApiError(400, 'failed-precondition', 'Bài đọc chưa có phiên bản xuất bản.');
+  if (!targetVersionId) {
+    throw new ApiError(400, 'failed-precondition', `Bài đọc chưa có phiên bản xuất bản (Mã: ${lessonId}).`);
+  }
 
-  const versionDoc = await db.collection('lessons').doc(lessonId).collection('versions').doc(targetVersionId).get();
-  if (!versionDoc.exists) throw new ApiError(404, 'not-found', 'Phiên bản bài đọc không tồn tại.');
+  let versionDoc = await db.collection('lessons').doc(lessonId).collection('versions').doc(targetVersionId).get();
+  if (!versionDoc.exists) {
+    const seed = findSeedLesson(lessonId);
+    if (seed) {
+      await ensureSeedLessonMaterialized(db, lessonId);
+      versionDoc = await db.collection('lessons').doc(lessonId).collection('versions').doc(targetVersionId).get();
+    }
+  }
+  if (!versionDoc.exists) {
+    throw new ApiError(404, 'not-found', `Phiên bản bài đọc không tồn tại (Mã: ${targetVersionId}).`);
+  }
   const vData = versionDoc.data()!;
 
   const now = Date.now();
@@ -2067,5 +2205,28 @@ async function handleGetStudentAttemptDetail(req: VercelApiRequest, data: any) {
       totalQuestions: att.totalQuestions || publicQuestions.length
     },
     questions: questionsDetail
+  };
+}
+
+// 12. CHECK TTS AVAILABILITY
+async function handleCheckTtsAvailability(req: VercelApiRequest) {
+  await requireTeacher(req);
+
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY;
+  const geminiAvailable = !!apiKey && apiKey.trim().length > 5;
+
+  return {
+    gemini: {
+      available: geminiAvailable,
+      reason: geminiAvailable ? undefined : 'Chưa cấu hình GEMINI_API_KEY trong hệ thống.'
+    },
+    piper: {
+      available: false,
+      reason: 'Piper TTS chỉ khả dụng trong môi trường máy chủ cục bộ / Docker.'
+    },
+    webSpeech: {
+      available: true,
+      reason: 'Hệ thống hỗ trợ phát âm tiếng Việt chuẩn trực tiếp trên trình duyệt qua Web Speech API.'
+    }
   };
 }

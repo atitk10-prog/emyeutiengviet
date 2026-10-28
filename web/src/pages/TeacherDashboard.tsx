@@ -35,7 +35,8 @@ import {
   REMEDIATION_ACTIVITY_LABELS,
   checkAnswerCorrectness,
   cleanOptionText,
-  validateSingleQuestion
+  validateSingleQuestion,
+  normalizeTeacherSteps
 } from '@emytv/shared';
 import {
   ResponsiveContainer,
@@ -2253,7 +2254,14 @@ export const TeacherDashboard: React.FC = () => {
         targetSkill: targetSk || undefined,
         targetAssignmentId: targetAssId !== 'all' ? targetAssId : undefined
       });
-      setRemediationData(res.data);
+      const remedResData = res.data;
+      if (remedResData?.suggestedActivities && Array.isArray(remedResData.suggestedActivities)) {
+        remedResData.suggestedActivities = remedResData.suggestedActivities.map((act: any) => ({
+          ...act,
+          teacherSteps: normalizeTeacherSteps(act.teacherSteps)
+        }));
+      }
+      setRemediationData(remedResData);
       setRemedOpenGroup('none');
     } catch (err: any) {
       alert('Lỗi phân tích kết quả học tập: ' + err.message);
@@ -2270,7 +2278,11 @@ export const TeacherDashboard: React.FC = () => {
       const listFunc = httpsCallable(functions, 'listRemediationActivities');
       const res: any = await listFunc({});
       if (res.data?.success && Array.isArray(res.data.activities)) {
-        setMyActivities(res.data.activities);
+        const sanitized = res.data.activities.map((a: any) => ({
+          ...a,
+          teacherSteps: normalizeTeacherSteps(a.teacherSteps)
+        }));
+        setMyActivities(sanitized);
       } else {
         throw new Error('Fallback to direct query');
       }
@@ -2296,7 +2308,10 @@ export const TeacherDashboard: React.FC = () => {
           // ignore
         }
 
-        const list = Array.from(map.values());
+        const list = Array.from(map.values()).map((a: any) => ({
+          ...a,
+          teacherSteps: normalizeTeacherSteps(a.teacherSteps)
+        }));
         list.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
         setMyActivities(list);
       } catch (fsErr) {
@@ -2397,7 +2412,7 @@ export const TeacherDashboard: React.FC = () => {
       alert('Mục tiêu GDPT 2018 cần tối thiểu 5 ký tự trước khi phê duyệt.');
       return;
     }
-    const cleanSteps = (activityToApprove.teacherSteps || []).filter((s) => String(s || '').trim().length > 0);
+    const cleanSteps = normalizeTeacherSteps(activityToApprove.teacherSteps);
     if (cleanSteps.length === 0) {
       alert('Cần tối thiểu 1 bước tổ chức sư phạm trước khi phê duyệt.');
       return;
@@ -8657,16 +8672,20 @@ export const TeacherDashboard: React.FC = () => {
                         </div>
 
                         {/* Các bước tổ chức ngắn gọn */}
-                        {act.teacherSteps && act.teacherSteps.length > 0 && (
-                          <div className="space-y-1">
-                            <div className="text-[10px] font-black uppercase text-slate-400">
-                              Quy trình tổ chức ({act.teacherSteps.length} bước):
+                        {(() => {
+                          const steps = normalizeTeacherSteps(act.teacherSteps);
+                          if (steps.length === 0) return null;
+                          return (
+                            <div className="space-y-1">
+                              <div className="text-[10px] font-black uppercase text-slate-400">
+                                Quy trình tổ chức ({steps.length} bước):
+                              </div>
+                              <div className="text-[11px] text-slate-600 line-clamp-2 font-medium">
+                                {steps.map((st, i) => `B${i + 1}: ${st}`).join(' · ')}
+                              </div>
                             </div>
-                            <div className="text-[11px] text-slate-600 line-clamp-2 font-medium">
-                              {act.teacherSteps.map((st, i) => `B${i + 1}: ${st}`).join(' · ')}
-                            </div>
-                          </div>
-                        )}
+                          );
+                        })()}
 
                         {/* Footer thẻ kèm nút hành động */}
                         <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap text-xs">
@@ -9924,16 +9943,20 @@ export const TeacherDashboard: React.FC = () => {
                             </div>
 
                             {/* 4 Bước sư phạm tổ chức */}
-                            {act.teacherSteps && act.teacherSteps.length > 0 && (
-                              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
-                                {act.teacherSteps.map((step, sIdx) => (
-                                  <div key={sIdx} className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
-                                    <div className="font-black text-sky-800 text-[10px] uppercase">Bước {sIdx + 1}</div>
-                                    <div className="text-[11px] text-slate-600 mt-1">{step}</div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                            {(() => {
+                              const steps = normalizeTeacherSteps(act.teacherSteps);
+                              if (steps.length === 0) return null;
+                              return (
+                                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
+                                  {steps.map((step, sIdx) => (
+                                    <div key={sIdx} className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                                      <div className="font-black text-sky-800 text-[10px] uppercase">Bước {sIdx + 1}</div>
+                                      <div className="text-[11px] text-slate-600 mt-1">{step}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            })()}
 
                             {/* Chuẩn bị & Tiêu chí */}
                             <div className="text-xs text-slate-600 space-y-1">
@@ -10205,7 +10228,7 @@ export const TeacherDashboard: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const next = [...(selectedActivityDetail.teacherSteps || [])];
+                                    const next = [...normalizeTeacherSteps(selectedActivityDetail.teacherSteps)];
                                     next.push(`Bước ${next.length + 1}: Hoạt động mở rộng tiếp theo...`);
                                     setSelectedActivityDetail({ ...selectedActivityDetail, teacherSteps: next });
                                   }}
@@ -10217,7 +10240,7 @@ export const TeacherDashboard: React.FC = () => {
                               </div>
 
                               <div className="space-y-2 text-xs">
-                                {(selectedActivityDetail.teacherSteps || []).map((step, sIdx) => (
+                                {normalizeTeacherSteps(selectedActivityDetail.teacherSteps).map((step, sIdx) => (
                                   <div key={sIdx} className="flex items-center gap-2">
                                     <span className="w-6 h-6 rounded-md bg-sky-100 text-sky-800 font-bold flex items-center justify-center shrink-0 text-[10px]">
                                       B{sIdx + 1}
@@ -10226,7 +10249,7 @@ export const TeacherDashboard: React.FC = () => {
                                       type="text"
                                       value={step}
                                       onChange={(e) => {
-                                        const nextSteps = [...(selectedActivityDetail.teacherSteps || [])];
+                                        const nextSteps = [...normalizeTeacherSteps(selectedActivityDetail.teacherSteps)];
                                         nextSteps[sIdx] = e.target.value;
                                         setSelectedActivityDetail({
                                           ...selectedActivityDetail,
@@ -10236,13 +10259,13 @@ export const TeacherDashboard: React.FC = () => {
                                       className="flex-1 p-2 rounded-lg border border-slate-200"
                                       placeholder={`Nội dung bước ${sIdx + 1}`}
                                     />
-                                    {(selectedActivityDetail.teacherSteps || []).length > 1 && (
+                                    {normalizeTeacherSteps(selectedActivityDetail.teacherSteps).length > 1 && (
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          const nextSteps = (selectedActivityDetail.teacherSteps || []).filter(
-                                            (_, idx) => idx !== sIdx
-                                          );
+                                          const nextSteps = normalizeTeacherSteps(
+                                            selectedActivityDetail.teacherSteps
+                                          ).filter((_, idx) => idx !== sIdx);
                                           setSelectedActivityDetail({
                                             ...selectedActivityDetail,
                                             teacherSteps: nextSteps
@@ -10449,7 +10472,7 @@ export const TeacherDashboard: React.FC = () => {
                                   Quy trình 4 bước tổ chức trên lớp:
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                                  {(selectedActivityDetail.teacherSteps || []).map((st, i) => (
+                                  {normalizeTeacherSteps(selectedActivityDetail.teacherSteps).map((st, i) => (
                                     <div
                                       key={i}
                                       className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-1"

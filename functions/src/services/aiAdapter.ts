@@ -15,7 +15,8 @@ import {
   AIServiceStatus,
   AIConfigStatusType,
   Grade,
-  QuestionType
+  QuestionType,
+  normalizeTeacherSteps
 } from '@emytv/shared';
 
 // ==========================================
@@ -1223,6 +1224,7 @@ BẮT BUỘC chỉ trả về định dạng JSON thuần túy theo cấu trúc:
       ? parsed.suggestedActivities.map((a: any, idx: number) => ({
           ...a,
           id: a.id || `act_ai_${Date.now()}_${idx}`,
+          teacherSteps: normalizeTeacherSteps(a.teacherSteps),
           status: 'draft',
           createdAt: Date.now()
         }))

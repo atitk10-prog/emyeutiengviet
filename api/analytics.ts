@@ -50,6 +50,49 @@ function formatVietnamDate(timestamp: number | null | undefined): string {
   });
 }
 
+export function normalizeTeacherSteps(raw: any): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .map((s) => {
+        if (typeof s === 'string') return s.trim();
+        if (typeof s === 'object' && s !== null) {
+          return String((s as any).step || (s as any).text || (s as any).title || (s as any).content || Object.values(s)[0] || '').trim();
+        }
+        return String(s || '').trim();
+      })
+      .filter((s) => s.length > 0);
+  }
+  if (typeof raw === 'string') {
+    const str = raw.trim();
+    if (!str) return [];
+    if (str.includes('\n')) {
+      return str
+        .split('\n')
+        .map((s) => s.trim().replace(/^[-*•\d+.)\]\s]+/, ''))
+        .filter((s) => s.length > 0);
+    }
+    const stepMatches = str.split(/(?=Bước\s+\d+[:.])/i).map((s) => s.trim()).filter((s) => s.length > 0);
+    if (stepMatches.length > 1) {
+      return stepMatches;
+    }
+    return [str];
+  }
+  if (typeof raw === 'object' && raw !== null) {
+    return Object.values(raw)
+      .map((v) => {
+        if (typeof v === 'string') return v.trim();
+        if (typeof v === 'object' && v !== null) {
+          return String((v as any).step || (v as any).text || (v as any).title || '').trim();
+        }
+        return String(v || '').trim();
+      })
+      .filter((s) => s.length > 0);
+  }
+  return [];
+}
+
+
 function getAcademicYearFromTimestamp(timestamp: number | null | undefined): {
   academicYear: string;
   semester: 1 | 2;
@@ -1275,6 +1318,7 @@ BẮT BUỘC trả về định dạng JSON thuần dạng:
             suggestedActivities = parsed.suggestedActivities.map((act: any, idx: number) => ({
               ...act,
               id: act.id || `act_ai_${now}_${idx + 1}`,
+              teacherSteps: normalizeTeacherSteps(act.teacherSteps),
               status: 'approved',
               createdAt: now
             }));
@@ -1296,7 +1340,10 @@ BẮT BUỘC trả về định dạng JSON thuần dạng:
     studentGroups: { supportGroup, growthGroup },
     statistics,
     analysisSummary,
-    suggestedActivities,
+    suggestedActivities: suggestedActivities.map((act) => ({
+      ...act,
+      teacherSteps: normalizeTeacherSteps(act.teacherSteps)
+    })),
     weakSkills: [
       {
         skillTag: 'tu_trong_ngu_canh',
@@ -1338,7 +1385,11 @@ async function handleListRemediationActivities(req: VercelApiRequest, data: any)
     if (activityType && activityType !== 'all' && act.activityType !== activityType) return;
     if (status && status !== 'all' && act.status !== status) return;
 
-    activities.push({ id: doc.id, ...act });
+    activities.push({
+      id: doc.id,
+      ...act,
+      teacherSteps: normalizeTeacherSteps(act.teacherSteps)
+    });
   });
 
   activities.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
@@ -1405,7 +1456,7 @@ async function handleSaveRemediationActivity(req: VercelApiRequest, data: any) {
     sourceQuestionId: rawActivity.sourceQuestionId || existingDoc.data()?.sourceQuestionId || '',
     durationMinutes: Number(rawActivity.durationMinutes) || existingDoc.data()?.durationMinutes || 10,
     materialsNeeded: Array.isArray(rawActivity.materialsNeeded) ? rawActivity.materialsNeeded : (existingDoc.data()?.materialsNeeded || []),
-    teacherSteps: Array.isArray(rawActivity.teacherSteps) ? rawActivity.teacherSteps : (existingDoc.data()?.teacherSteps || []),
+    teacherSteps: normalizeTeacherSteps(rawActivity.teacherSteps || existingDoc.data()?.teacherSteps),
     contentPayload: rawActivity.contentPayload || existingDoc.data()?.contentPayload || { instructions: '' },
     evaluationCriteria: String(rawActivity.evaluationCriteria || existingDoc.data()?.evaluationCriteria || '').trim(),
     status: isApproved ? 'approved' : 'draft',
@@ -1469,9 +1520,7 @@ async function handleApproveRemediationActivity(req: VercelApiRequest, data: any
   if (!cleanObjective || cleanObjective.length < 5) {
     throw new ApiError(400, 'invalid-argument', 'Mục tiêu GDPT 2018 cần tối thiểu 5 ký tự để phê duyệt.');
   }
-  const teacherSteps = Array.isArray(merged.teacherSteps)
-    ? merged.teacherSteps.filter((s: any) => String(s || '').trim().length > 0)
-    : [];
+  const teacherSteps = normalizeTeacherSteps(merged.teacherSteps);
   if (teacherSteps.length === 0) {
     throw new ApiError(400, 'invalid-argument', 'Cần tối thiểu 1 bước tổ chức sư phạm trước khi phê duyệt.');
   }

@@ -43,7 +43,8 @@ import {
   ANALYSIS_SCOPE_LABELS,
   QuestionType,
   RemediationActivity,
-  RemediationActivityType
+  RemediationActivityType,
+  normalizeTeacherSteps
 } from '@emytv/shared';
 
 // ==========================================
@@ -5985,7 +5986,7 @@ export const saveRemediationActivity = functions.https.onCall(async (data, conte
     sourceQuestionId: sourceQuestionId || existingDoc.data()?.sourceQuestionId || '',
     durationMinutes: Number(durationMinutes) || existingDoc.data()?.durationMinutes || 10,
     materialsNeeded: Array.isArray(materialsNeeded) ? materialsNeeded : (existingDoc.data()?.materialsNeeded || []),
-    teacherSteps: Array.isArray(teacherSteps) ? teacherSteps : (existingDoc.data()?.teacherSteps || []),
+    teacherSteps: normalizeTeacherSteps(teacherSteps || existingDoc.data()?.teacherSteps),
     contentPayload: contentPayload || existingDoc.data()?.contentPayload || { instructions: '' },
     evaluationCriteria: String(evaluationCriteria || existingDoc.data()?.evaluationCriteria || '').trim(),
     status: isApproved ? 'approved' : 'draft',
@@ -6051,9 +6052,7 @@ export const approveRemediationActivity = functions.https.onCall(async (data, co
   if (!cleanObjective || cleanObjective.length < 5) {
     throw new functions.https.HttpsError('failed-precondition', 'Mục tiêu GDPT 2018 cần tối thiểu 5 ký tự để phê duyệt.');
   }
-  const teacherSteps = Array.isArray(merged.teacherSteps)
-    ? merged.teacherSteps.filter((s: any) => String(s || '').trim().length > 0)
-    : [];
+  const teacherSteps = normalizeTeacherSteps(merged.teacherSteps);
   if (teacherSteps.length === 0) {
     throw new functions.https.HttpsError('failed-precondition', 'Cần tối thiểu 1 bước tổ chức sư phạm trước khi phê duyệt.');
   }

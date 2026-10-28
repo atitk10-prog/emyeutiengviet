@@ -714,6 +714,52 @@ export interface RemediationActivity {
   updatedAt?: number;
 }
 
+/**
+ * Chuẩn hóa teacherSteps thành mảng chuỗi an toàn, ngăn chặn lỗi TypeError map/filter
+ */
+export function normalizeTeacherSteps(raw: any): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .map((s) => {
+        if (typeof s === 'string') return s.trim();
+        if (typeof s === 'object' && s !== null) {
+          return String((s as any).step || (s as any).text || (s as any).title || (s as any).content || Object.values(s)[0] || '').trim();
+        }
+        return String(s || '').trim();
+      })
+      .filter((s) => s.length > 0);
+  }
+  if (typeof raw === 'string') {
+    const str = raw.trim();
+    if (!str) return [];
+    if (str.includes('\n')) {
+      return str
+        .split('\n')
+        .map((s) => s.trim().replace(/^[-*•\d+.)\]\s]+/, ''))
+        .filter((s) => s.length > 0);
+    }
+    const stepMatches = str.split(/(?=Bước\s+\d+[:.])/i).map((s) => s.trim()).filter((s) => s.length > 0);
+    if (stepMatches.length > 1) {
+      return stepMatches;
+    }
+    return [str];
+  }
+  if (typeof raw === 'object' && raw !== null) {
+    return Object.values(raw)
+      .map((v) => {
+        if (typeof v === 'string') return v.trim();
+        if (typeof v === 'object' && v !== null) {
+          return String((v as any).step || (v as any).text || (v as any).title || '').trim();
+        }
+        return String(v || '').trim();
+      })
+      .filter((s) => s.length > 0);
+  }
+  return [];
+}
+
+
 export interface RemediationSuggestionRequest {
   classId: string;
   academicYear?: string;
