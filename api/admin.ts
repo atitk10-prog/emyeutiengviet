@@ -92,9 +92,30 @@ export default async function handler(req: VercelApiRequest, res: VercelApiRespo
   }
 }
 
+// Memory caches for admin endpoints to eliminate repetitive full-collection scans
+const adminOverviewCache = { data: null as any, timestamp: 0 };
+const ADMIN_OVERVIEW_TTL_MS = 3 * 60 * 1000;
+
+const adminTeachersCache = { data: null as any, timestamp: 0 };
+const ADMIN_TEACHERS_TTL_MS = 2 * 60 * 1000;
+
+const adminClassesCache = { data: null as any, timestamp: 0 };
+const ADMIN_CLASSES_TTL_MS = 2 * 60 * 1000;
+
+const adminCurriculumCache = new Map<string, { data: any; timestamp: number }>();
+const ADMIN_CURRICULUM_TTL_MS = 30 * 60 * 1000;
+
+const adminAcademicYearsCache = { data: null as any, timestamp: 0 };
+const ADMIN_ACADEMIC_YEARS_TTL_MS = 5 * 60 * 1000;
+
 // 1. GET ADMIN OVERVIEW
 async function handleGetAdminOverview(req: VercelApiRequest) {
   await requireAdmin(req);
+
+  if (adminOverviewCache.data && Date.now() - adminOverviewCache.timestamp < ADMIN_OVERVIEW_TTL_MS) {
+    return adminOverviewCache.data;
+  }
+
   const db = getDb();
 
   const [
@@ -107,7 +128,7 @@ async function handleGetAdminOverview(req: VercelApiRequest) {
     completedAttemptsCountSnap,
     curriculumSnap
   ] = await Promise.all([
-    db.collection('users').where('role', '==', 'teacher').get(),
+    db.collection('users').where('role', '==', 'teacher').limit(100).get(),
     db.collection('classes').count().get(),
     db.collection('students').count().get(),
     db.collection('lessons').count().get(),
@@ -146,7 +167,7 @@ async function handleGetAdminOverview(req: VercelApiRequest) {
   const completedAttempts = completedAttemptsCountSnap.data().count;
   const inProgressAttempts = Math.max(0, totalAttempts - completedAttempts);
 
-  return {
+  const result = {
     success: true,
     totalClasses: classesCountSnap.data().count,
     totalStudents: studentsCountSnap.data().count,
@@ -161,15 +182,26 @@ async function handleGetAdminOverview(req: VercelApiRequest) {
     isolatedTestTeachers,
     curriculumCoverage
   };
+
+  adminOverviewCache.data = result;
+  adminOverviewCache.timestamp = Date.now();
+  return result;
 }
 
 // 2. LIST TEACHERS
 async function handleListTeachers(req: VercelApiRequest) {
   await requireAdmin(req);
+
+  if (adminTeachersCache.data && Date.now() - adminTeachersCache.timestamp < ADMIN_TEACHERS_TTL_MS) {
+    return adminTeachersCache.data;
+  }
+
   const db = getDb();
 
-  const usersSnap = await db.collection('users').where('role', '==', 'teacher').get();
-  const classesSnap = await db.collection('classes').get();
+  const [usersSnap, classesSnap] = await Promise.all([
+    db.collection('users').where('role', '==', 'teacher').limit(100).get(),
+    db.collection('classes').limit(100).get()
+  ]);
 
   const classCountMap: Record<string, number> = {};
   classesSnap.forEach((c) => {
@@ -192,31 +224,30 @@ async function handleListTeachers(req: VercelApiRequest) {
     };
   });
 
-  return { success: true, teachers };
+  const result = { success: true, teachers };
+  adminTeachersCache.data = result;
+  adminTeachersCache.timestamp = Date.now();
+  return result;
 }
 
-// 3. LIST ALL CLASSES ADMIN
+// 3. LIST ALL CLASSES ADMIN (OPTIMIZED: Eliminates full students collection scan)
 async function handleListAllClassesAdmin(req: VercelApiRequest) {
   await requireAdmin(req);
+
+  if (adminClassesCache.data && Date.now() - adminClassesCache.timestamp < ADMIN_CLASSES_TTL_MS) {
+    return adminClassesCache.data;
+  }
+
   const db = getDb();
 
-  const [classesSnap, usersSnap, studentsSnap] = await Promise.all([
-    db.collection('classes').get(),
-    db.collection('users').get(),
-    db.collection('students').get()
+  const [classesSnap, teachersSnap] = await Promise.all([
+    db.collection('classes').limit(100).get(),
+    db.collection('users').where('role', '==', 'teacher').limit(100).get()
   ]);
 
   const teacherMap: Record<string, string> = {};
-  usersSnap.forEach((d) => {
+  teachersSnap.forEach((d) => {
     teacherMap[d.id] = d.data().displayName || d.data().email || 'Giáo viên';
-  });
-
-  const studentCountMap: Record<string, number> = {};
-  studentsSnap.forEach((s) => {
-    const cId = s.data().classId;
-    if (cId) {
-      studentCountMap[cId] = (studentCountMap[cId] || 0) + 1;
-    }
   });
 
   const classes = classesSnap.docs.map((doc) => {
@@ -227,7 +258,7 @@ async function handleListAllClassesAdmin(req: VercelApiRequest) {
       grade: d.grade,
       classCode: d.classCode,
       academicYear: d.academicYear || '2026-2027',
-      studentCount: studentCountMap[doc.id] || 0,
+      studentCount: typeof d.studentCount === 'number' ? d.studentCount : 0,
       teacherUid: d.teacherUid,
       teacherName: teacherMap[d.teacherUid] || 'Chưa phân công',
       status: d.status || 'active',
@@ -235,14 +266,24 @@ async function handleListAllClassesAdmin(req: VercelApiRequest) {
     };
   });
 
-  return { success: true, classes };
+  const result = { success: true, classes };
+  adminClassesCache.data = result;
+  adminClassesCache.timestamp = Date.now();
+  return result;
 }
 
 // 4. GET CURRICULUM FRAMEWORK
 async function handleGetCurriculumFramework(req: VercelApiRequest, data: any) {
   await requireAdmin(req);
-  const db = getDb();
   const { grade } = data || {};
+  const cacheKey = `curr_${grade || 'all'}`;
+
+  const cached = adminCurriculumCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < ADMIN_CURRICULUM_TTL_MS) {
+    return cached.data;
+  }
+
+  const db = getDb();
 
   let query: FirebaseFirestore.Query = db.collection('curriculumNodes');
   if (grade && (Number(grade) === 2 || Number(grade) === 3)) {
@@ -252,18 +293,24 @@ async function handleGetCurriculumFramework(req: VercelApiRequest, data: any) {
   const snap = await query.get();
   const nodes = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-  return { success: true, nodes };
+  const result = { success: true, nodes };
+  adminCurriculumCache.set(cacheKey, { data: result, timestamp: Date.now() });
+  return result;
 }
 
-// 5. LIST ACADEMIC YEARS
+// 5. LIST ACADEMIC YEARS (OPTIMIZED: Eliminates full students collection scan)
 async function handleListAcademicYears(req: VercelApiRequest) {
   await requireAdmin(req);
+
+  if (adminAcademicYearsCache.data && Date.now() - adminAcademicYearsCache.timestamp < ADMIN_ACADEMIC_YEARS_TTL_MS) {
+    return adminAcademicYearsCache.data;
+  }
+
   const db = getDb();
 
-  const [aySnap, classesSnap, studentsSnap] = await Promise.all([
+  const [aySnap, classesSnap] = await Promise.all([
     db.collection('academicYears').get(),
-    db.collection('classes').get(),
-    db.collection('students').get()
+    db.collection('classes').get()
   ]);
 
   const configuredYears = new Map<string, any>();
@@ -272,24 +319,20 @@ async function handleListAcademicYears(req: VercelApiRequest) {
   });
 
   const allYearsSet = new Set<string>(configuredYears.keys());
-  const classToYear = new Map<string, string>();
+  const yearClassCount = new Map<string, number>();
+  const yearStudentCount = new Map<string, number>();
+
   classesSnap.forEach((d) => {
-    const yr = d.data().academicYear || '2026-2027';
+    const cData = d.data();
+    const yr = cData.academicYear || '2026-2027';
     allYearsSet.add(yr);
-    classToYear.set(d.id, yr);
+    yearClassCount.set(yr, (yearClassCount.get(yr) || 0) + 1);
+    const count = typeof cData.studentCount === 'number' ? cData.studentCount : 0;
+    yearStudentCount.set(yr, (yearStudentCount.get(yr) || 0) + count);
   });
 
   // Ensure operational year 2026-2027 exists
   allYearsSet.add('2026-2027');
-
-  const yearStudentsMap = new Map<string, Set<string>>();
-  allYearsSet.forEach((yr) => yearStudentsMap.set(yr, new Set<string>()));
-  studentsSnap.forEach((d) => {
-    const yr = classToYear.get(d.data().classId);
-    if (yr && yearStudentsMap.has(yr)) {
-      yearStudentsMap.get(yr)!.add(d.id);
-    }
-  });
 
   let currentYearCode = '2026-2027';
   for (const [code, data] of configuredYears.entries()) {
@@ -343,18 +386,21 @@ async function handleListAcademicYears(req: VercelApiRequest) {
         endDate: existing?.endDate || '',
         totalClasses,
         activeClasses,
-        totalStudents: yearStudentsMap.get(code)?.size || 0,
+        totalStudents: yearStudentCount.get(code) || 0,
         canDelete: totalClasses === 0,
         createdAt: existing?.createdAt || Date.now(),
         updatedAt: existing?.updatedAt || Date.now()
       };
     });
 
-  return {
+  const result = {
     success: true,
     academicYears: items,
     currentAcademicYear: currentYearCode
   };
+  adminAcademicYearsCache.data = result;
+  adminAcademicYearsCache.timestamp = Date.now();
+  return result;
 }
 
 // 6. APPROVE TEACHER ACCOUNT

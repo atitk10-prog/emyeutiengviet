@@ -127,9 +127,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Immediately set user in state to prevent route guard bounce
       setUser(userCred.user);
 
-      // Force-refresh ID token so custom claims are immediately populated
+      // Populate ID token claims immediately without redundant forced STS network roundtrip
       try {
-        await userCred.user.getIdTokenResult(true);
+        await userCred.user.getIdTokenResult(false);
       } catch (tokenErr) {
         console.warn('[AuthContext] getIdTokenResult error:', tokenErr);
       }

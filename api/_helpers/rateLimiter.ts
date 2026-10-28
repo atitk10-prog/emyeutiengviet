@@ -161,6 +161,7 @@ export async function recordFailedAttempt(
 ): Promise<{ failedCount: number; isLocked: boolean; remainingSeconds: number }> {
   const hashedKey = `rl_${hashKeyComponent(rawIdentifier)}`;
   const now = Date.now();
+  knownFailedKeys.add(hashedKey);
 
   // In-memory tracking
   let memCount = 1;
@@ -224,6 +225,9 @@ export async function recordFailedAttempt(
   }
 }
 
+// Track keys that experienced a failure to avoid reading Firestore on every clean login
+const knownFailedKeys = new Set<string>();
+
 /**
  * Clear failed attempts on successful login.
  * ONLY writes if there was a previous failure, saving quota on normal logins.
@@ -233,13 +237,16 @@ export async function clearFailedAttempts(rawIdentifier: string): Promise<void> 
   memoryLimiter.delete(hashedKey);
   burstShield.delete(hashedKey);
 
+  if (!knownFailedKeys.has(hashedKey)) {
+    // 0 database reads: No failures were recorded in this serverless lifecycle
+    return;
+  }
+  knownFailedKeys.delete(hashedKey);
+
   try {
     const db = getDb();
     const docRef = db.collection('loginAttempts').doc(hashedKey);
-    const snap = await docRef.get();
-    if (snap.exists) {
-      await docRef.delete();
-    }
+    await docRef.delete();
   } catch {
     // Non-fatal
   }

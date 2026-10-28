@@ -15,6 +15,16 @@ import { handleApiError, requireStudentSession, verifyAuthToken } from './_helpe
 import { ApiError, VercelApiRequest, VercelApiResponse } from './_helpers/types.js';
 import { checkAnswerCorrectness } from './_helpers/answerEvaluator.js';
 
+// In-memory caches protecting Firestore Spark quota across student flows
+const privateKeyCache = new Map<string, { data: any; timestamp: number }>();
+const PRIVATE_KEY_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+const studentLibraryCache = new Map<string, { result: any; timestamp: number }>();
+const STUDENT_LIBRARY_TTL_MS = 45 * 1000; // 45 seconds
+
+const lessonVersionDetailCache = new Map<string, { data: any; timestamp: number }>();
+const LESSON_VERSION_DETAIL_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
 export default async function handler(req: VercelApiRequest, res: VercelApiResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -88,6 +98,12 @@ async function handleGetStudentLibrary(req: VercelApiRequest) {
   const session = await requireStudentSession(req);
   const db = getDb();
 
+  const cacheKey = `${session.studentId}_${session.classId}`;
+  const cached = studentLibraryCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < STUDENT_LIBRARY_TTL_MS) {
+    return cached.result;
+  }
+
   let studentCode = '';
   let className = '';
   let grade = 2;
@@ -117,10 +133,12 @@ async function handleGetStudentLibrary(req: VercelApiRequest) {
     db.collection('assignments')
       .where('classId', '==', session.classId)
       .where('status', '==', 'active')
+      .limit(50)
       .get(),
     db.collection('attempts')
       .where('studentId', '==', session.studentId)
       .where('classId', '==', session.classId)
+      .limit(50)
       .get()
   ]);
 
@@ -135,7 +153,7 @@ async function handleGetStudentLibrary(req: VercelApiRequest) {
     attemptsByAssignment.set(aId, list);
   });
 
-  // Pre-fetch unique lesson versions in parallel
+  // Pre-fetch unique lesson versions in parallel with in-memory caching
   const versionMap = new Map<string, any>();
   const neededPairs = Array.from(new Set(
     assignmentsSnap.docs
@@ -145,11 +163,18 @@ async function handleGetStudentLibrary(req: VercelApiRequest) {
 
   await Promise.all(
     neededPairs.map(async (pair) => {
+      const cachedV = lessonVersionDetailCache.get(pair);
+      if (cachedV && Date.now() - cachedV.timestamp < LESSON_VERSION_DETAIL_TTL_MS) {
+        versionMap.set(pair, cachedV.data);
+        return;
+      }
       const [lId, vId] = pair.split(':::');
       try {
         const vDoc = await db.collection('lessons').doc(lId).collection('versions').doc(vId).get();
         if (vDoc.exists) {
-          versionMap.set(pair, vDoc.data());
+          const vData = vDoc.data();
+          versionMap.set(pair, vData);
+          lessonVersionDetailCache.set(pair, { data: vData, timestamp: Date.now() });
         }
       } catch {}
     })
@@ -221,7 +246,7 @@ async function handleGetStudentLibrary(req: VercelApiRequest) {
     });
   }
 
-  return {
+  const result = {
     success: true,
     student: {
       id: session.studentId,
@@ -234,12 +259,18 @@ async function handleGetStudentLibrary(req: VercelApiRequest) {
     },
     assignments
   };
+
+  studentLibraryCache.set(cacheKey, { result, timestamp: Date.now() });
+  return result;
 }
 
 // 2. START ATTEMPT
 async function handleStartAttempt(req: VercelApiRequest, data: any) {
   const session = await requireStudentSession(req);
   const { assignmentId, idempotencyKey } = data || {};
+
+  // Invalidate library cache when new attempt starts
+  studentLibraryCache.delete(`${session.studentId}_${session.classId}`);
 
   if (!assignmentId) {
     throw new ApiError(400, 'invalid-argument', 'Mã bài giao không được để trống.');
@@ -285,14 +316,15 @@ async function handleStartAttempt(req: VercelApiRequest, data: any) {
   }
 
   // Check attempt limit
+  const maxAttempts = assignData.maxAttempts || 3;
   const completedSnap = await db
     .collection('attempts')
     .where('assignmentId', '==', assignmentId)
     .where('studentId', '==', session.studentId)
     .where('status', '==', 'completed')
+    .limit(maxAttempts)
     .get();
 
-  const maxAttempts = assignData.maxAttempts || 3;
   if (completedSnap.size >= maxAttempts) {
     throw new ApiError(
       429,
@@ -402,13 +434,19 @@ async function handleSubmitAnswer(req: VercelApiRequest, data: any) {
     }
   }
 
-  // Fetch private answer key from server collection
-  const keyDoc = await db.collection('privateAnswerKeys').doc(att.lessonVersionId).get();
-  if (!keyDoc.exists) {
-    throw new ApiError(404, 'not-found', 'Không tìm thấy đáp án chấm của bài học này.');
+  // Fetch private answer key from server collection (with in-memory cache)
+  let keyData: any = null;
+  const cachedKey = privateKeyCache.get(att.lessonVersionId);
+  if (cachedKey && Date.now() - cachedKey.timestamp < PRIVATE_KEY_TTL_MS) {
+    keyData = cachedKey.data;
+  } else {
+    const keyDoc = await db.collection('privateAnswerKeys').doc(att.lessonVersionId).get();
+    if (!keyDoc.exists) {
+      throw new ApiError(404, 'not-found', 'Không tìm thấy đáp án chấm của bài học này.');
+    }
+    keyData = keyDoc.data()!;
+    privateKeyCache.set(att.lessonVersionId, { data: keyData, timestamp: Date.now() });
   }
-
-  const keyData = keyDoc.data()!;
   const qDetail = keyData.answers[questionId];
   if (!qDetail) {
     throw new ApiError(404, 'not-found', `Không tìm thấy câu hỏi ${questionId} trong đáp án.`);
@@ -581,6 +619,9 @@ async function handleFinishAttempt(req: VercelApiRequest, data: any) {
   };
 
   await attemptRef.update(updateData);
+
+  // Invalidate student library cache upon finishing attempt so updated status reflects immediately
+  studentLibraryCache.delete(`${session.studentId}_${att.classId}`);
 
   return {
     success: true,
