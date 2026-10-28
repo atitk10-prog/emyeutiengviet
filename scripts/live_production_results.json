@@ -1,19 +1,19 @@
 {
-  "timestamp": "2026-10-28T05:50:13.142Z",
+  "timestamp": "2026-10-28T07:09:48.859Z",
   "baseUrl": "https://emyeutiengviet-zeta.vercel.app",
   "targetProject": "emyeutiengviet-prod",
   "benchmarks": {
-    "admin_login_latency_ms": 1313,
-    "admin_overview_latency_ms": 293,
-    "admin_classes_latency_ms": 301,
-    "teacher_login_latency_ms": 1022,
-    "teacher_lessons_latency_ms": 340,
-    "teacher_classes_latency_ms": 401,
-    "teacher_preview_latency_ms": 267,
-    "student_login_latency_ms": 1171,
-    "student_library_latency_ms": 1466,
-    "student_start_attempt_latency_ms": 811,
-    "student_finish_attempt_latency_ms": 645
+    "admin_login_latency_ms": 2432,
+    "admin_overview_latency_ms": 1576,
+    "admin_classes_latency_ms": 629,
+    "teacher_login_latency_ms": 1088,
+    "teacher_lessons_latency_ms": 1666,
+    "teacher_classes_latency_ms": 1422,
+    "teacher_preview_latency_ms": 547,
+    "student_login_latency_ms": 1774,
+    "student_library_latency_ms": 1764,
+    "student_start_attempt_latency_ms": 847,
+    "student_finish_attempt_latency_ms": 710
   },
   "success": true
 }

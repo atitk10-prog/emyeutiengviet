@@ -12424,188 +12424,203 @@ export const TeacherDashboard: React.FC = () => {
                   <Loader2 className="w-9 h-9 text-primary-600 animate-spin mx-auto" />
                   <p className="text-sm font-bold text-slate-600">Đang đồng bộ tiến độ học sinh từ Firestore...</p>
                 </div>
-              ) : progressData ? (
-                <>
-                  {/* Part A. Thống kê theo lớp */}
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-black text-base text-slate-900 flex items-center gap-2">
-                        <Users className="w-4 h-4 text-primary-600" />
-                        <span>Thống Kê Tổng Hợp Lớp {progressData.classInfo?.name}</span>
-                      </h4>
-                      {progressData.assignment?.availableUntil && (
-                        <span className="text-xs font-bold text-slate-500 flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5 text-amber-600" />
-                          <span>Hạn nộp: {new Date(progressData.assignment.availableUntil).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}</span>
-                        </span>
-                      )}
-                    </div>
+              ) : progressData ? (() => {
+                const asgReport = Array.isArray(progressData.assignments) && progressData.assignments.length > 0
+                  ? progressData.assignments[0]
+                  : (progressData.assignment || progressData);
+                const classInfo = progressData.classInfo || {
+                  name: asgReport.className || viewingProgressAssignment?.className || 'Lớp học',
+                  grade: asgReport.grade || viewingProgressAssignment?.lessonGrade || 2
+                };
+                const stats = progressData.stats || {
+                  totalStudents: asgReport.totalStudents || 0,
+                  completedCount: asgReport.completedCount || 0,
+                  inProgressCount: asgReport.inProgressCount || 0,
+                  notStartedCount: asgReport.notStartedCount || 0,
+                  completionRate: asgReport.completionRate || 0,
+                  avgScore: asgReport.averageScorePercentage !== null && asgReport.averageScorePercentage !== undefined ? (asgReport.averageScorePercentage / 10).toFixed(1) : null
+                };
+                const studentList: any[] = asgReport.students || progressData.students || [];
+                const totalQ = asgReport.totalQuestions || progressData.assignment?.totalQuestions || viewingProgressAssignment?.totalQuestions || 5;
 
-                    {/* KPI Cards Grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                      <div className="p-4 bg-sky-50 border border-sky-200 rounded-2xl text-center">
-                        <span className="text-[11px] font-bold text-sky-700 uppercase tracking-wider block">Tổng số học sinh</span>
-                        <span className="text-2xl md:text-3xl font-black text-sky-950 mt-1 block">
-                          {progressData.stats?.totalStudents || 0}
-                        </span>
-                        <span className="text-[10px] text-sky-600 font-semibold">Thuộc danh sách lớp</span>
+                const filteredStudents = studentList.filter((s: any) => {
+                  const matchStatus = progressStatusFilter === 'all' || s.status === progressStatusFilter;
+                  const query = progressSearch.trim().toLowerCase();
+                  const sName = s.studentName || s.displayName || s.displayAlias || '';
+                  const matchSearch =
+                    !query ||
+                    sName.toLowerCase().includes(query) ||
+                    (s.studentCode || '').toLowerCase().includes(query);
+                  return matchStatus && matchSearch;
+                });
+
+                return (
+                  <>
+                    {/* Part A. Thống kê theo lớp */}
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-black text-base text-slate-900 flex items-center gap-2">
+                          <Users className="w-4 h-4 text-primary-600" />
+                          <span>Thống Kê Tổng Hợp Lớp {classInfo.name}</span>
+                        </h4>
+                        {(progressData.assignment?.availableUntil || asgReport.availableUntil) && (
+                          <span className="text-xs font-bold text-slate-500 flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Hạn nộp: {new Date(progressData.assignment?.availableUntil || asgReport.availableUntil).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}</span>
+                          </span>
+                        )}
                       </div>
 
-                      <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-center">
-                        <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider block">Đã hoàn thành</span>
-                        <span className="text-2xl md:text-3xl font-black text-emerald-950 mt-1 block">
-                          {progressData.stats?.completedCount || 0}
-                        </span>
-                        <span className="text-[10px] text-emerald-700 font-bold">
-                          {progressData.stats?.completionRate || 0}% cả lớp
-                        </span>
+                      {/* KPI Cards Grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                        <div className="p-4 bg-sky-50 border border-sky-200 rounded-2xl text-center">
+                          <span className="text-[11px] font-bold text-sky-700 uppercase tracking-wider block">Tổng số học sinh</span>
+                          <span className="text-2xl md:text-3xl font-black text-sky-950 mt-1 block">
+                            {stats.totalStudents || 0}
+                          </span>
+                          <span className="text-[10px] text-sky-600 font-semibold">Thuộc danh sách lớp</span>
+                        </div>
+
+                        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-center">
+                          <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider block">Đã hoàn thành</span>
+                          <span className="text-2xl md:text-3xl font-black text-emerald-950 mt-1 block">
+                            {stats.completedCount || 0}
+                          </span>
+                          <span className="text-[10px] text-emerald-700 font-bold">
+                            {stats.completionRate || 0}% cả lớp
+                          </span>
+                        </div>
+
+                        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-center">
+                          <span className="text-[11px] font-bold text-amber-700 uppercase tracking-wider block">Đang làm dở</span>
+                          <span className="text-2xl md:text-3xl font-black text-amber-950 mt-1 block">
+                            {stats.inProgressCount || 0}
+                          </span>
+                          <span className="text-[10px] text-amber-700 font-semibold">Chưa bấm nộp bài</span>
+                        </div>
+
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-center">
+                          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Chưa làm bài</span>
+                          <span className="text-2xl md:text-3xl font-black text-slate-700 mt-1 block">
+                            {stats.notStartedCount || 0}
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-semibold">Chưa mở đề</span>
+                        </div>
+
+                        <div className="p-4 bg-purple-50 border border-purple-200 rounded-2xl text-center col-span-2 sm:col-span-1">
+                          <span className="text-[11px] font-bold text-purple-700 uppercase tracking-wider block">Điểm trung bình</span>
+                          <span className="text-2xl md:text-3xl font-black text-purple-950 mt-1 block">
+                            {stats.avgScore !== null && stats.avgScore !== undefined ? `${stats.avgScore}` : '—'}
+                          </span>
+                          <span className="text-[10px] text-purple-700 font-semibold">
+                            {stats.avgScore !== null && stats.avgScore !== undefined ? 'Thang điểm 10' : 'Chưa có bài nộp'}
+                          </span>
+                        </div>
                       </div>
 
-                      <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-center">
-                        <span className="text-[11px] font-bold text-amber-700 uppercase tracking-wider block">Đang làm dở</span>
-                        <span className="text-2xl md:text-3xl font-black text-amber-950 mt-1 block">
-                          {progressData.stats?.inProgressCount || 0}
-                        </span>
-                        <span className="text-[10px] text-amber-700 font-semibold">Chưa bấm nộp bài</span>
-                      </div>
-
-                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl text-center">
-                        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Chưa làm bài</span>
-                        <span className="text-2xl md:text-3xl font-black text-slate-700 mt-1 block">
-                          {progressData.stats?.notStartedCount || 0}
-                        </span>
-                        <span className="text-[10px] text-slate-500 font-semibold">Chưa mở đề</span>
-                      </div>
-
-                      <div className="p-4 bg-purple-50 border border-purple-200 rounded-2xl text-center col-span-2 sm:col-span-1">
-                        <span className="text-[11px] font-bold text-purple-700 uppercase tracking-wider block">Điểm trung bình</span>
-                        <span className="text-2xl md:text-3xl font-black text-purple-950 mt-1 block">
-                          {progressData.stats?.avgScore !== null ? `${progressData.stats.avgScore}` : '—'}
-                        </span>
-                        <span className="text-[10px] text-purple-700 font-semibold">
-                          {progressData.stats?.avgScore !== null ? 'Thang điểm 10' : 'Chưa có bài nộp'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Completion Progress Bar */}
-                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
-                      <div className="flex justify-between items-center text-xs font-bold text-slate-700">
-                        <span>Tiến trình hoàn thành chung của lớp:</span>
-                        <span className="text-primary-700 font-black text-sm">{progressData.stats?.completionRate || 0}%</span>
-                      </div>
-                      <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex">
-                        <div
-                          className="bg-emerald-500 h-full transition-all duration-500"
-                          style={{ width: `${progressData.stats?.totalStudents ? ((progressData.stats.completedCount / progressData.stats.totalStudents) * 100) : 0}%` }}
-                          title={`Hoàn thành: ${progressData.stats?.completedCount || 0}`}
-                        />
-                        <div
-                          className="bg-amber-400 h-full transition-all duration-500"
-                          style={{ width: `${progressData.stats?.totalStudents ? ((progressData.stats.inProgressCount / progressData.stats.totalStudents) * 100) : 0}%` }}
-                          title={`Đang làm: ${progressData.stats?.inProgressCount || 0}`}
-                        />
-                      </div>
-                      <div className="flex items-center gap-4 text-[11px] font-semibold text-slate-500 pt-1">
-                        <span className="flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-                          <span>Đã nộp bài ({progressData.stats?.completedCount || 0})</span>
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
-                          <span>Đang làm ({progressData.stats?.inProgressCount || 0})</span>
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-slate-300 inline-block" />
-                          <span>Chưa làm ({progressData.stats?.notStartedCount || 0})</span>
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Part B. Danh sách chi tiết từng học sinh */}
-                  <div className="space-y-4 pt-2 border-t border-slate-200">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <h4 className="font-black text-base text-slate-900 flex items-center gap-2">
-                        <GraduationCap className="w-4 h-4 text-purple-600" />
-                        <span>Danh Sách Học Sinh & Kết Quả Chi Tiết</span>
-                      </h4>
-
-                      {/* Search & Filter */}
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="relative">
-                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                          <input
-                            type="text"
-                            placeholder="Tìm tên hoặc mã..."
-                            value={progressSearch}
-                            onChange={(e) => setProgressSearch(e.target.value)}
-                            className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-primary-400 outline-none w-44"
+                      {/* Completion Progress Bar */}
+                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                        <div className="flex justify-between items-center text-xs font-bold text-slate-700">
+                          <span>Tiến trình hoàn thành chung của lớp:</span>
+                          <span className="text-primary-700 font-black text-sm">{stats.completionRate || 0}%</span>
+                        </div>
+                        <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex">
+                          <div
+                            className="bg-emerald-500 h-full transition-all duration-500"
+                            style={{ width: `${stats.totalStudents ? ((stats.completedCount / stats.totalStudents) * 100) : 0}%` }}
+                            title={`Hoàn thành: ${stats.completedCount || 0}`}
+                          />
+                          <div
+                            className="bg-amber-400 h-full transition-all duration-500"
+                            style={{ width: `${stats.totalStudents ? ((stats.inProgressCount / stats.totalStudents) * 100) : 0}%` }}
+                            title={`Đang làm: ${stats.inProgressCount || 0}`}
                           />
                         </div>
-
-                        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
-                          <button
-                            type="button"
-                            onClick={() => setProgressStatusFilter('all')}
-                            className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
-                              progressStatusFilter === 'all' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                            }`}
-                          >
-                            Tất cả ({progressData.students?.length || 0})
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setProgressStatusFilter('completed')}
-                            className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
-                              progressStatusFilter === 'completed' ? 'bg-emerald-500 text-white shadow-xs' : 'text-slate-600 hover:text-emerald-700'
-                            }`}
-                          >
-                            Hoàn thành ({progressData.stats?.completedCount || 0})
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setProgressStatusFilter('in_progress')}
-                            className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
-                              progressStatusFilter === 'in_progress' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-600 hover:text-amber-700'
-                            }`}
-                          >
-                            Đang làm ({progressData.stats?.inProgressCount || 0})
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setProgressStatusFilter('not_started')}
-                            className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
-                              progressStatusFilter === 'not_started' ? 'bg-slate-400 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                            }`}
-                          >
-                            Chưa làm ({progressData.stats?.notStartedCount || 0})
-                          </button>
+                        <div className="flex items-center gap-4 text-[11px] font-semibold text-slate-500 pt-1">
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                            <span>Đã nộp bài ({stats.completedCount || 0})</span>
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
+                            <span>Đang làm ({stats.inProgressCount || 0})</span>
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-slate-300 inline-block" />
+                            <span>Chưa làm ({stats.notStartedCount || 0})</span>
+                          </span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Students Table */}
-                    {(() => {
-                      const filteredStudents = (progressData.students || []).filter((s: any) => {
-                        const matchStatus = progressStatusFilter === 'all' || s.status === progressStatusFilter;
-                        const query = progressSearch.trim().toLowerCase();
-                        const matchSearch =
-                          !query ||
-                          s.studentName?.toLowerCase().includes(query) ||
-                          s.studentCode?.toLowerCase().includes(query);
-                        return matchStatus && matchSearch;
-                      });
+                    {/* Part B. Danh sách chi tiết từng học sinh */}
+                    <div className="space-y-4 pt-2 border-t border-slate-200">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <h4 className="font-black text-base text-slate-900 flex items-center gap-2">
+                          <GraduationCap className="w-4 h-4 text-purple-600" />
+                          <span>Danh Sách Học Sinh & Kết Quả Chi Tiết</span>
+                        </h4>
 
-                      if (filteredStudents.length === 0) {
-                        return (
-                          <div className="py-12 text-center text-slate-400 text-xs font-medium bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                            Không có học sinh nào khớp với bộ lọc hiện tại.
+                        {/* Search & Filter */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="relative">
+                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input
+                              type="text"
+                              placeholder="Tìm tên hoặc mã..."
+                              value={progressSearch}
+                              onChange={(e) => setProgressSearch(e.target.value)}
+                              className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-primary-400 outline-none w-44"
+                            />
                           </div>
-                        );
-                      }
 
-                      return (
+                          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                            <button
+                              type="button"
+                              onClick={() => setProgressStatusFilter('all')}
+                              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+                                progressStatusFilter === 'all' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              Tất cả ({studentList.length})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setProgressStatusFilter('completed')}
+                              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+                                progressStatusFilter === 'completed' ? 'bg-emerald-500 text-white shadow-xs' : 'text-slate-600 hover:text-emerald-700'
+                              }`}
+                            >
+                              Hoàn thành ({stats.completedCount || 0})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setProgressStatusFilter('in_progress')}
+                              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+                                progressStatusFilter === 'in_progress' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-600 hover:text-amber-700'
+                              }`}
+                            >
+                              Đang làm ({stats.inProgressCount || 0})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setProgressStatusFilter('not_started')}
+                              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+                                progressStatusFilter === 'not_started' ? 'bg-slate-400 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              Chưa làm ({stats.notStartedCount || 0})
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Students Table */}
+                      {filteredStudents.length === 0 ? (
+                        <div className="py-12 text-center text-slate-400 text-xs font-medium bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                          Không có học sinh nào khớp với bộ lọc hiện tại.
+                        </div>
+                      ) : (
                         <div className="overflow-x-auto border border-slate-200 rounded-2xl shadow-xs">
                           <table className="w-full text-left text-xs">
                             <thead className="bg-slate-50 text-slate-700 font-extrabold uppercase tracking-wider border-b border-slate-200">
@@ -12627,6 +12642,11 @@ export const TeacherDashboard: React.FC = () => {
                                 const isCompleted = s.status === 'completed';
                                 const isInProgress = s.status === 'in_progress';
                                 const isNotStarted = s.status === 'not_started';
+                                const sName = s.studentName || s.displayName || s.displayAlias || s.studentId;
+                                const answeredQ = s.completedQuestions ?? s.questionsAnswered ?? 0;
+                                const scoreVal = s.score !== undefined && s.score !== null
+                                  ? s.score
+                                  : (s.scorePercentage !== null && s.scorePercentage !== undefined ? Number((s.scorePercentage / 10).toFixed(1)) : null);
 
                                 return (
                                   <tr key={s.studentId} className="hover:bg-slate-50/70 transition">
@@ -12634,10 +12654,10 @@ export const TeacherDashboard: React.FC = () => {
                                       {idx + 1}
                                     </td>
                                     <td className="p-3 font-extrabold text-slate-900">
-                                      {s.studentName}
-                                      {s.attemptCount > 1 && (
+                                      {sName}
+                                      {s.attemptsCount > 1 && (
                                         <span className="ml-2 px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-bold">
-                                          Lượt {s.attemptCount}
+                                          Lượt {s.attemptsCount}
                                         </span>
                                       )}
                                     </td>
@@ -12665,31 +12685,31 @@ export const TeacherDashboard: React.FC = () => {
                                     </td>
                                     <td className="p-3 font-bold text-slate-700">
                                       {isNotStarted ? (
-                                        <span className="text-slate-400">0 / {progressData.assignment.totalQuestions}</span>
+                                        <span className="text-slate-400">0 / {totalQ}</span>
                                       ) : (
-                                        <span>{s.questionsAnswered} / {progressData.assignment.totalQuestions}</span>
+                                        <span>{answeredQ} / {totalQ}</span>
                                       )}
                                     </td>
                                     <td className="p-3 font-black text-sm">
-                                      {isCompleted && s.score !== null ? (
-                                        <span className={s.score >= 8 ? 'text-emerald-700' : s.score >= 5 ? 'text-amber-700' : 'text-rose-700'}>
-                                          {s.score}/10
+                                      {isCompleted && scoreVal !== null ? (
+                                        <span className={scoreVal >= 8 ? 'text-emerald-700' : scoreVal >= 5 ? 'text-amber-700' : 'text-rose-700'}>
+                                          {scoreVal}/10
                                         </span>
                                       ) : (
                                         <span className="text-slate-300 font-normal">—</span>
                                       )}
                                     </td>
                                     <td className="p-3 font-semibold text-slate-700">
-                                      {isCompleted && s.firstTryCorrectCount !== null ? (
+                                      {isCompleted && s.firstTryCorrectCount !== null && s.firstTryCorrectCount !== undefined ? (
                                         <span className="text-emerald-800 font-bold">{s.firstTryCorrectCount} câu</span>
                                       ) : (
                                         <span className="text-slate-300">—</span>
                                       )}
                                     </td>
                                     <td className="p-3 font-semibold text-slate-700">
-                                      {isCompleted && s.finalCorrectCount !== null ? (
+                                      {isCompleted && s.finalCorrectCount !== null && s.finalCorrectCount !== undefined ? (
                                         <span className="text-amber-800 font-bold">
-                                          {Math.max(0, s.finalCorrectCount - s.firstTryCorrectCount)} câu
+                                          {Math.max(0, s.finalCorrectCount - (s.firstTryCorrectCount || 0))} câu
                                         </span>
                                       ) : (
                                         <span className="text-slate-300">—</span>
@@ -12725,11 +12745,11 @@ export const TeacherDashboard: React.FC = () => {
                             </tbody>
                           </table>
                         </div>
-                      );
-                    })()}
-                  </div>
-                </>
-              ) : (
+                      )}
+                    </div>
+                  </>
+                );
+              })() : (
                 <div className="py-12 text-center text-slate-500 text-xs">
                   Không thể tải dữ liệu tiến độ.
                 </div>
